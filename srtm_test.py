@@ -13,7 +13,7 @@ from PIL import Image, ImageOps
 import math
 from zipfile import ZipFile
 import coloraide
-from blend_modes import multiply, overlay
+from blend_modes import multiply, overlay, soft_light, hard_light, darken_only
 import catacomb
 from getpass import getpass
 import requests
@@ -228,6 +228,7 @@ if len(sys.argv) > 1 and sys.argv[1] == 'previous' and os.path.exists(os.path.ex
     in_txt_file = open(os.path.expanduser('~/color_out_of_earth/previous.txt'), "r")
     lines = in_txt_file.readlines()
     locationCode, latitude, longitude = lines[0].strip(), int(lines[1].strip()), int(lines[2].strip())
+    print(locationCode)
     zip_file_name = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(locationCode))
 if zip_file_name is None:
     username, password = getEOSDISlogin()
@@ -313,15 +314,20 @@ print(el_img.size)
 # colorize elevation data
 ah = random.randint(0,359)
 bh = ah
-while angleDist(ah, bh) < 90 or angleDist(ah, bh) > 120:
+while angleDist(ah, bh) < 60 or angleDist(ah, bh) > 120:
     bh = random.randint(0, 359)
 ch = bh
-while angleDist(ch, ah) < 90 or angleDist(ch, bh) < 90:
+while angleDist(ch, ah) < 60 or angleDist(ch, bh) < 60 or (angleDist(ch, ah) > 120 and angleDist(ch, bh) > 120):
     ch = random.randint(0, 359)
 print('hues', ah, bh, ch)
-a = highestChromaColor(20, ah)
-b = highestChromaColor(40, bh)
-c = highestChromaColor(90, ch)
+lights = [20, 40, 90]
+lightHue = ch
+if random.randint(0, 1) == 1:
+    lights.reverse()
+    lightHue = ah
+a = highestChromaColor(lights[0], ah)
+b = highestChromaColor(lights[1], bh)
+c = highestChromaColor(lights[2], ch)
 allSteps = a.steps([b, c], steps=256, space='lch-d65')
 highChromaSteps = []
 for col in allSteps:
@@ -352,11 +358,10 @@ hs_img = Image.fromarray(autocontrastedUint8(hsSum))
 print(hs_img.mode, len(hs_img.getcolors()))
 
 # colorize hillshade
-aah = ch
 clist = []
 highChroma = 0
-for l in range(20, 51):
-    col = highestChromaColor(l, ch)
+for l in range(0, 51):
+    col = highestChromaColor(l, lightHue)
     chroma = col.convert('lch-d65').c 
     if chroma > highChroma:
         highChroma = chroma
@@ -370,11 +375,11 @@ ii = clist[0].interpolate(clist[1:], space='lch-d65')
 color_hs_img = colorizeWithInterpolation(hs_img, ii)
 
 # blend colorized elevation with hillshade
+# bw_hs_arr = np.array(hs_img.convert('RGBA'))
 color_hs_img = color_hs_img.convert('RGBA')
 color_el_arr = np.array(color_el_img.convert('RGBA'))
 hs_arr = np.array(color_hs_img)
-# hs_arr = np.array(hs_img.convert('RGBA'))
-blended_float = multiply(color_el_arr.astype(float), hs_arr.astype(float), 0.75)
+blended_float = multiply(hs_arr.astype(float), color_el_arr.astype(float), 1)
 blended_arr = np.uint8(blended_float)
 blended_img = Image.fromarray(blended_arr)
 
