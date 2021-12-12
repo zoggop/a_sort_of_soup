@@ -315,9 +315,19 @@ ah = random.randint(0,359)
 bh = ah
 while angleDist(ah, bh) < 90 or angleDist(ah, bh) > 120:
     bh = random.randint(0, 359)
-a = highestChromaColor(25, ah)
-b = highestChromaColor(75, bh)
-i = b.interpolate(a, space='lch-d65')
+ch = bh
+while angleDist(ch, ah) < 90 or angleDist(ch, bh) < 90:
+    ch = random.randint(0, 359)
+print('hues', ah, bh, ch)
+a = highestChromaColor(20, ah)
+b = highestChromaColor(40, bh)
+c = highestChromaColor(90, ch)
+allSteps = a.steps([b, c], steps=256, space='lch-d65')
+highChromaSteps = []
+for col in allSteps:
+    lch = col.convert('lch-d65')
+    highChromaSteps.append(highestChromaColor(lch.l, lch.h))
+i = highChromaSteps[0].interpolate(highChromaSteps[1:], space='lch-d65')
 color_el_img = colorizeWithInterpolation(el_img, i)
 
 # create hillshade
@@ -342,14 +352,11 @@ hs_img = Image.fromarray(autocontrastedUint8(hsSum))
 print(hs_img.mode, len(hs_img.getcolors()))
 
 # colorize hillshade
-aah = 0
-while angleDist(aah, ah) < 90 or angleDist(aah, bh) < 90:
-    aah = random.randint(0, 359)
-print('hues', ah, bh, aah)
+aah = ch
 clist = []
 highChroma = 0
-for l in range(20, 101):
-    col = highestChromaColor(l, aah)
+for l in range(20, 51):
+    col = highestChromaColor(l, ch)
     chroma = col.convert('lch-d65').c 
     if chroma > highChroma:
         highChroma = chroma
@@ -367,7 +374,7 @@ color_hs_img = color_hs_img.convert('RGBA')
 color_el_arr = np.array(color_el_img.convert('RGBA'))
 hs_arr = np.array(color_hs_img)
 # hs_arr = np.array(hs_img.convert('RGBA'))
-blended_float = multiply(color_el_arr.astype(float), hs_arr.astype(float), 1)
+blended_float = multiply(color_el_arr.astype(float), hs_arr.astype(float), 0.75)
 blended_arr = np.uint8(blended_float)
 blended_img = Image.fromarray(blended_arr)
 
