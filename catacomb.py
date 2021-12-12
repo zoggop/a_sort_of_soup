@@ -6,17 +6,21 @@ from getpass import getpass
 from pbkdf2 import PBKDF2
 from Crypto.Cipher import AES
 
-class WeAreNeagan(object):
-    SEED = 'uR7UtrczNUM0FnzR8X'  # MAKE THIS YOUR OWN RANDOM STRING
-    KP_FILE = './kfileNsxConfigVerfiy.p'
-    SDB_FILE = './sdbfileNsxConfigVerify'
+# adapted from:
+# https://infotechbrain.com/2018/09/examples-of-python-password-encryption-stored-in-a-file/
+
+class Catacomb:
     PASSPHRASE_SIZE = 64  # 512-bit passphrase
     KEY_SIZE = 32  # 256-bit key
     BLOCK_SIZE = 16  # 16-bit blocks
     IV_SIZE = 16  # 128-bits to initialize
     SALT_SIZE = 8  # 64-bits of salt
 
-    def __init__(self):
+    def __init__(self, directory, seed):
+        self.directory = directory
+        self.SEED = seed
+        self.KP_FILE = '{}/kfileNsxConfigVerfiy.p'.format(directory)
+        self.SDB_FILE = '{}/sdbfileNsxConfigVerify'.format(directory)
         try:
             with open(self.KP_FILE, 'rb') as f:
                 self.kp = f.read()
@@ -93,21 +97,5 @@ class WeAreNeagan(object):
         # Recreate cipher
         cipher = AES.new(key, AES.MODE_CBC, initVector)
 
-        # Decrypt and depad
-        return cipher.decrypt(encryptedData).rstrip(bytes(' ', 'utf-8'))
-
-
-if __name__ == '__main__':
-    pname = input("Please Enter Username: ")
-    # p = getpass("Please enter a value for {}: ".format(pname))
-    # p2 = getpass("To verfiy, Please renter the value for {}: ".format(pname))
-    # while p != p2:
-    #     print('Values DO NOT match')
-    #     p = getpass("Please enter a value for {}: ".format(pname))
-    #     p2 = getpass("To verfiy, Please reenter the value for {}: ".format(pname))
-    johnny = WeAreNeagan()
-    # Encrypting and Storing
-    # johnny.encrypt(pname, p)
-    # print('Encryption Complete!')
-    print('Your password is...')
-    print(johnny.decrypt(pname).decode('utf-8'))
+        # Decrypt, depad, and decode
+        return cipher.decrypt(encryptedData).rstrip(bytes(' ', 'utf-8')).decode('utf-8')
