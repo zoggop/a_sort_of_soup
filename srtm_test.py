@@ -62,7 +62,7 @@ def highestChromaColor(lightness, hue):
         chromaStep = 1
     chroma = maxChroma
     iteration = 0
-    while iteration < 35:
+    while iteration < 45:
         c = lch_to_rgb(lightness, chroma, hue)
         if not c is None:
             if chromaStep == 0.01 or maxChroma == 0:
@@ -73,6 +73,7 @@ def highestChromaColor(lightness, hue):
                 chroma -= chromaStep
         chroma = max(0, chroma - chromaStep)
         iteration += 1
+    print(chromaStep, lightness, chroma, hue, iteration)
 
 def gradeFunc(v):
     return CurrentGrade[v]
@@ -345,7 +346,19 @@ aah = 0
 while angleDist(aah, ah) < 90 or angleDist(aah, bh) < 90:
     aah = random.randint(0, 359)
 print('hues', ah, bh, aah)
-clist = [highestChromaColor(20, aah), highestChromaColor(55, aah), highestChromaColor(90, aah), 'white']
+clist = []
+highChroma = 0
+for l in range(20, 101):
+    col = highestChromaColor(l, aah)
+    chroma = col.convert('lch-d65').c 
+    if chroma > highChroma:
+        highChroma = chroma
+    if chroma < highChroma-1:
+        break
+    clist.append(col)
+clist.extend(clist[-1].steps('white', steps=99-l, space='lch-d65'))
+print(l)
+# clist = [highestChromaColor(20, aah), highestChromaColor(50, aah), highestChromaColor(95, aah)]
 ii = clist[0].interpolate(clist[1:], space='lch-d65')
 color_hs_img = colorizeWithInterpolation(hs_img, ii)
 
