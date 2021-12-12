@@ -264,10 +264,10 @@ with ZipFile(zip_file_name or BytesIO(zip_data), 'r') as zip:
 print(arr.shape)
 metersPerPixel = xMeters / arr.shape[1]
 print("meters per pixel:", metersPerPixel)
-print("{:.0f} m by {:.0f} m".format(xMeters, yMeters))
-print("from {} m to {} m".format(arr.min(), arr.max()))
+print("{:,.0f} m by {:,.0f} m".format(xMeters, yMeters))
+print("from {:,} m to {:,} m".format(arr.min(), arr.max()))
 
-# Image.fromarray(arr).save(os.path.expanduser('~/color_out_of_earth/original_elevation.png'))
+# Image.fromarray((arr-arr.min()).astype(np.uint16)).save(os.path.expanduser('~/color_out_of_earth/original_elevation.png'))
 
 # calculate where a crop won't just be an image of flat water
 nonZeroYs, nonZeroXs = np.nonzero(arr)
@@ -295,13 +295,17 @@ else:
 x2 = x + cropWidth
 y2 = y + heightBecomeCrop
 arr = arr[y:y2, x:x2]
-print(arr.shape)
+print("cropped", arr.shape, arr.min(), arr.max())
 
 # stretch and rotate elevation data
-arr = arr.astype(np.uint16)
+# arr = arr.astype(np.int16)
+arr = arr.astype(np.single)
+print("astype", arr.shape, arr.min(), arr.max())
 arr = cv2.resize(arr, dsize=(cropWidth, cropHeight), interpolation=cv2.INTER_CUBIC)
+print("resize", arr.shape, arr.min(), arr.max())
 if rotation > 0:
     arr = np.rot90(arr, k=rotation)
+print("rotation", arr.shape, arr.min(), arr.max())
 
 # convert equalized elevation data to 256-color grayscale image
 el_img = Image.fromarray(image_histogram_equalization(arr, 256).astype(np.uint8))
@@ -314,8 +318,8 @@ bh = ah
 while angleDist(ah, bh) < 90 or angleDist(ah, bh) > 120:
     bh = random.randint(0, 359)
 print("hues", ah, bh)
-a = highestChromaColor(35, ah)
-b = highestChromaColor(85, bh)
+a = highestChromaColor(25, ah)
+b = highestChromaColor(75, bh)
 i = b.interpolate(a, space='lch-d65')
 color_el_img = colorizeWithInterpolation(el_img, i)
 
@@ -329,9 +333,10 @@ hsSum = None
 # arrForShade = denoise_nl_means(arr, patch_size=11, patch_distance=21, h=2, fast_mode=True, preserve_range=True)
 # arrForShade = denoise_tv_chambolle(arr, weight=0.005)
 arrForShade = arr / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
+print("for shade", arrForShade.shape, arrForShade.min(), arrForShade.max())
 for shade in shades:
     hs = hillshade(arrForShade, shade[0], shade[1]) * shade[2]
-    Image.fromarray(hs.astype(np.uint8)).save(os.path.expanduser('~/color_out_of_earth/hs-{}-{}-{}.png'.format(*shade)))
+    # Image.fromarray(hs.astype(np.uint8)).save(os.path.expanduser('~/color_out_of_earth/hs-{}-{}-{}.png'.format(*shade)))
     if hsSum is None:
         hsSum = hs
     else:
@@ -340,12 +345,9 @@ hs_img = Image.fromarray(autocontrastedUint8(hsSum))
 print(hs_img.mode, len(hs_img.getcolors()))
 
 # colorize hillshade
-aah = (min(ah,bh)-80)%360
-bbh = (max(ah,bh)+80)%360
-print("hues", aah, bbh)
-aa = highestChromaColor(25, aah)
-bb = highestChromaColor(75, bbh)
-ii = aa.interpolate(bb, space='lch-d65')
+aah = (min(ah,bh)-120)%360
+clist = [highestChromaColor(25, aah), highestChromaColor(50, aah), 'white']
+ii = clist[0].interpolate(clist[1:], space='lch-d65')
 color_hs_img = colorizeWithInterpolation(hs_img, ii)
 
 # blend colorized elevation with hillshade
@@ -353,7 +355,7 @@ color_hs_img = color_hs_img.convert('RGBA')
 color_el_arr = np.array(color_el_img.convert('RGBA'))
 hs_arr = np.array(color_hs_img)
 # hs_arr = np.array(hs_img.convert('RGBA'))
-blended_float = multiply(color_el_arr.astype(float), hs_arr.astype(float), 0.7)
+blended_float = multiply(color_el_arr.astype(float), hs_arr.astype(float), 1)
 blended_arr = np.uint8(blended_float)
 blended_img = Image.fromarray(blended_arr)
 
@@ -363,7 +365,7 @@ el_img.save(os.path.expanduser('~/color_out_of_earth/el_img.png'))
 hs_img.save(os.path.expanduser('~/color_out_of_earth/hs_img.png'))
 color_el_img.save(os.path.expanduser('~/color_out_of_earth/color_el_img.png'))
 color_hs_img.save(os.path.expanduser('~/color_out_of_earth/color_hs_img.png'))
-Image.fromarray(arr).save(os.path.expanduser('~/color_out_of_earth/el16_img.png'))
+# Image.fromarray(autocontrastedUint16(arr)).save(os.path.expanduser('~/color_out_of_earth/el16_img.png'))
 
 # save zip file
 if zip_file_name is None and not zip_data is None:
