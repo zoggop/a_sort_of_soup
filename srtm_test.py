@@ -9,7 +9,6 @@ from numpy import sqrt
 from numpy import zeros
 from numpy import uint8
 import numpy as np
-import matplotlib.pyplot as plt
 from PIL import Image, ImageOps
 import math
 from zipfile import ZipFile
@@ -18,14 +17,12 @@ from blend_modes import multiply, overlay
 import catacomb
 from getpass import getpass
 import requests
-from requests.auth import HTTPBasicAuth
 from io import BytesIO
 import random
 import sys
 import json
-import datetime
-import cv2
-from skimage.restoration import denoise_nl_means, denoise_tv_chambolle
+from cv2 import resize, INTER_CUBIC
+# from skimage.restoration import denoise_nl_means, denoise_tv_chambolle
 
 degreesPerTheta = 90 / (math.pi / 2)
 maxChroma = 134
@@ -210,9 +207,9 @@ def randomSRTMlocation():
 
 def downloadHGT(url, un, pw):
     # print(url)
-    response = requests.get(url, auth = HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'})
+    response = requests.get(url, auth = requests.auth.HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'})
     print("redirected")
-    response2 = requests.get(response.url, auth = HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'}, stream=True)
+    response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'}, stream=True)
     totalkB = int(int(response2.headers.get('Content-Length')) / 1024)
     kB = 0
     content = b''
@@ -301,7 +298,7 @@ print("cropped", arr.shape, arr.min(), arr.max())
 # arr = arr.astype(np.int16)
 arr = arr.astype(np.single)
 print("astype", arr.shape, arr.min(), arr.max())
-arr = cv2.resize(arr, dsize=(cropWidth, cropHeight), interpolation=cv2.INTER_CUBIC)
+arr = resize(arr, dsize=(cropWidth, cropHeight), interpolation=INTER_CUBIC)
 print("resize", arr.shape, arr.min(), arr.max())
 if rotation > 0:
     arr = np.rot90(arr, k=rotation)
@@ -317,7 +314,6 @@ ah = random.randint(0,359)
 bh = ah
 while angleDist(ah, bh) < 90 or angleDist(ah, bh) > 120:
     bh = random.randint(0, 359)
-print("hues", ah, bh)
 a = highestChromaColor(25, ah)
 b = highestChromaColor(75, bh)
 i = b.interpolate(a, space='lch-d65')
@@ -345,8 +341,11 @@ hs_img = Image.fromarray(autocontrastedUint8(hsSum))
 print(hs_img.mode, len(hs_img.getcolors()))
 
 # colorize hillshade
-aah = (min(ah,bh)-120)%360
-clist = [highestChromaColor(25, aah), highestChromaColor(50, aah), 'white']
+aah = 0
+while angleDist(aah, ah) < 90 or angleDist(aah, bh) < 90:
+    aah = random.randint(0, 359)
+print('hues', ah, bh, aah)
+clist = [highestChromaColor(20, aah), highestChromaColor(55, aah), highestChromaColor(90, aah), 'white']
 ii = clist[0].interpolate(clist[1:], space='lch-d65')
 color_hs_img = colorizeWithInterpolation(hs_img, ii)
 
