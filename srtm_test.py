@@ -9,11 +9,11 @@ from numpy import sqrt
 from numpy import zeros
 from numpy import uint8
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image
 import math
 from zipfile import ZipFile
 import coloraide
-from blend_modes import multiply, overlay, soft_light, hard_light, darken_only
+from blend_modes import multiply #, overlay, soft_light, hard_light, darken_only
 import catacomb
 from getpass import getpass
 import requests
@@ -22,6 +22,7 @@ import random
 import sys
 import json
 from cv2 import resize, INTER_CUBIC
+from perceptual_hues_lavg import perceptualHues
 # from skimage.restoration import denoise_nl_means, denoise_tv_chambolle
 
 degreesPerTheta = 90 / (math.pi / 2)
@@ -40,6 +41,9 @@ def uniformlyRandomIntLatLon(minLat, maxLat):
     lat = math.asin(z) * degreesPerTheta
     lon = random.randint(-180, 180)
     return int(lat), lon
+
+def perceptuallyUniformRandomHue():
+    return random.choice(perceptualHues)
 
 def angleDist(a, b):
     return abs(((b - a) + 180) % 360 - 180)
@@ -74,6 +78,11 @@ def highestChromaColor(lightness, hue):
         chroma = max(0, chroma - chromaStep)
         iteration += 1
     print(chromaStep, lightness, chroma, hue, iteration)
+
+def huesDeltaE(hueA, hueB):
+    a = lch_to_rgb(57, 32, hueA)
+    b = lch_to_rgb(57, 32, hueB)
+    return a.delta_e(b, method='2000')
 
 def gradeFunc(v):
     return CurrentGrade[v]
@@ -113,8 +122,8 @@ def image_histogram_equalization(image, number_bins=65536):
     # get image histogram
     image_histogram, bins = np.histogram(image.flatten(), number_bins, density=True)
     cdf = image_histogram.cumsum() # cumulative distribution function
-    cdf = (number_bins - 1) * cdf / cdf[-1] # normalize
-
+    normal_mult = (number_bins - 1) / (cdf[-1] - cdf[0])
+    cdf = (cdf - cdf[0]) * normal_mult # normalize
     # use linear interpolation of cdf to find new pixel values
     image_equalized = np.interp(image.flatten(), bins[:-1], cdf)
 
@@ -133,12 +142,12 @@ def hillshade(array, azimuth, angle_altitude):
     return 255*((shaded + 1)/2)
 
 def autocontrastedUint8(arr):
-    divisor = (arr.max() - arr.min()) / 255
-    return ((arr - arr.min()) / divisor).astype(np.uint8)
+    mult = 255 / (arr.max() - arr.min())
+    return ((arr - arr.min()) * mult).astype(np.uint8)
 
 def autocontrastedUint16(arr):
-    divisor = (arr.max() - arr.min()) / 65535
-    return ((arr - arr.min()) / divisor).astype(np.uint16)
+    mult = 65535 / (arr.max() - arr.min())
+    return ((arr - arr.min()) * mult).astype(np.uint16)
 
 def measureLatLonInMeters(lat1, lon1, lat2, lon2):
     R = 6378.137 # Radius of earth in KM
@@ -282,6 +291,9 @@ xMin = max(0, min(nonZeroXs[0] - acceptableOceanWidth, xMax))
 yMin = max(0, min(nonZeroYs[0] - acceptableOceanHeight, yMax))
 print(xMin, xMax, yMin, yMax)
 
+gx, gy = gradient(arr)
+print(np.count_nonzero(gx==0), np.count_nonzero(gy==0), np.count_nonzero(arr==0), arr.shape[0]*arr.shape[1])
+
 # get a random crop
 if xMax > xMin:
     x = random.randint(xMin, xMax)
@@ -306,25 +318,36 @@ if rotation > 0:
     arr = np.rot90(arr, k=rotation)
 print("rotation", arr.shape, arr.min(), arr.max())
 
+# clip negative bits if this crop contains ocean
+if 0 in arr and arr.min() < 0:
+    arr = np.clip(arr, 0, None)
+    print(np.count_nonzero(arr<0))
+    print("clipped", arr.shape, arr.min(), arr.max())
+
 # convert equalized elevation data to 256-color grayscale image
-el_img = Image.fromarray(image_histogram_equalization(arr, 256).astype(np.uint8))
+arr_eq = image_histogram_equalization(arr, 256)
+print("equalized", arr_eq.shape, arr_eq.min(), arr_eq.max())
+el_img = Image.fromarray(arr_eq.astype(np.uint8))
+# el_img = Image.fromarray(autocontrastedUint8(arr))
 print(el_img.mode, len(el_img.getcolors()))
 print(el_img.size)
 
 # colorize elevation data
-ah = random.randint(0,359)
+ah = perceptuallyUniformRandomHue()
 bh = ah
-while angleDist(ah, bh) < 60 or angleDist(ah, bh) > 120:
-    bh = random.randint(0, 359)
+while huesDeltaE(ah, bh) < 20 or huesDeltaE(ah, bh) > 40:
+    bh = perceptuallyUniformRandomHue()
 ch = bh
-while angleDist(ch, ah) < 60 or angleDist(ch, bh) < 60 or (angleDist(ch, ah) > 120 and angleDist(ch, bh) > 120):
-    ch = random.randint(0, 359)
+while huesDeltaE(ch, ah) < 20 or huesDeltaE(ch, bh) < 20 or (huesDeltaE(ch, ah) > 40 and huesDeltaE(ch, bh) > 40):
+    ch = perceptuallyUniformRandomHue()
 print('hues', ah, bh, ch)
-lights = [20, 40, 90]
-lightHue = ch
-if random.randint(0, 1) == 1:
+lights = [random.randint(10,30), random.randint(40, 60), random.randint(75,95)]
+print(lights)
+highsDark = random.randint(0, 1) == 1
+if highsDark == True:
+    print("highs dark")
+    # color the terrain with high elevation dark
     lights.reverse()
-    lightHue = ah
 a = highestChromaColor(lights[0], ah)
 b = highestChromaColor(lights[1], bh)
 c = highestChromaColor(lights[2], ch)
@@ -337,16 +360,22 @@ i = highChromaSteps[0].interpolate(highChromaSteps[1:], space='lch-d65')
 color_el_img = colorizeWithInterpolation(el_img, i)
 
 # create hillshade
+# arrForShade = denoise_nl_means(arr, patch_size=11, patch_distance=21, h=2, fast_mode=True, preserve_range=True)
+# arrForShade = denoise_tv_chambolle(arr, weight=0.005)
+arrForShade = arr / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
+if highsDark == True:
+    print("invert height for dark highs")
+    lightHue = highChromaSteps[0].convert('lch-d65').h
+    arrForShade = arr.max() - arr
+else:
+    lightHue = highChromaSteps[-1].convert('lch-d65').h
+print("for shade", arrForShade.shape, arrForShade.min(), arrForShade.max())
 shades = [
     [350, 70, 0.9],
     [15, 60, 0.7],
     [270, 55, 1.0]
 ]
 hsSum = None
-# arrForShade = denoise_nl_means(arr, patch_size=11, patch_distance=21, h=2, fast_mode=True, preserve_range=True)
-# arrForShade = denoise_tv_chambolle(arr, weight=0.005)
-arrForShade = arr / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
-print("for shade", arrForShade.shape, arrForShade.min(), arrForShade.max())
 for shade in shades:
     hs = hillshade(arrForShade, shade[0], shade[1]) * shade[2]
     # Image.fromarray(hs.astype(np.uint8)).save(os.path.expanduser('~/color_out_of_earth/hs-{}-{}-{}.png'.format(*shade)))
@@ -362,7 +391,7 @@ clist = []
 highChroma = 0
 for l in range(0, 51):
     col = highestChromaColor(l, lightHue)
-    chroma = col.convert('lch-d65').c 
+    chroma = col.convert('lch-d65').c
     if chroma > highChroma:
         highChroma = chroma
     if chroma < highChroma-1:
@@ -391,8 +420,17 @@ color_el_img.save(os.path.expanduser('~/color_out_of_earth/color_el_img.png'))
 color_hs_img.save(os.path.expanduser('~/color_out_of_earth/color_hs_img.png'))
 # Image.fromarray(autocontrastedUint16(arr)).save(os.path.expanduser('~/color_out_of_earth/el16_img.png'))
 
-# save zip file
 if zip_file_name is None and not zip_data is None:
+    # delete previous zip file
+    if os.path.exists(os.path.expanduser('~/color_out_of_earth/previous.txt')):
+        in_txt_file = open(os.path.expanduser('~/color_out_of_earth/previous.txt'), "r")
+        lines = in_txt_file.readlines()
+        prevLocCode, prevLat, prevLon = lines[0].strip(), int(lines[1].strip()), int(lines[2].strip())
+        prevZipFilepath = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(prevLocCode))
+        if os.path.exists(prevZipFilepath):
+            os.remove(prevZipFilepath)
+            # print("deleted", prevZipFilepath)
+    # save zip file
     out_file = open(os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(locationCode)), "wb")
     out_file.write(zip_data)
     out_file.close()
