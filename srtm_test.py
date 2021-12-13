@@ -13,7 +13,7 @@ from PIL import Image
 import math
 from zipfile import ZipFile
 import coloraide
-from blend_modes import multiply #, overlay, soft_light, hard_light, darken_only
+from blend_modes import multiply, overlay, soft_light, hard_light, darken_only
 import catacomb
 from getpass import getpass
 import requests
@@ -23,13 +23,19 @@ import sys
 import json
 from cv2 import resize, INTER_CUBIC
 from perceptual_hues_lavg import perceptualHues
-# from skimage.restoration import denoise_nl_means, denoise_tv_chambolle
+from skimage.restoration import denoise_nl_means, denoise_tv_chambolle
 
 degreesPerTheta = 90 / (math.pi / 2)
 maxChroma = 134
 tileFilter = None # 'water' for only tiles with some water, 'land' for only tiles without water, None for no filter
 
 CurrentGrade = None
+
+def asInt(intStr):
+	try:
+		return int(intStr)
+	except:
+		return None
 
 def latitudeToZ(latitude):
 	theta = latitude / degreesPerTheta
@@ -150,13 +156,21 @@ def hillshade(array, azimuth, angle_altitude, slope=None, aspect=None):
 	 * cos((azimuthrad - pi/2.) - aspect)
 	return 255*((shaded + 1)/2)
 
+def autocontrast(arr, maxValue):
+	mult = maxValue / (arr.max() - arr.min())
+	return (arr - arr.min()) * mult
+
 def autocontrastedUint8(arr):
-	mult = 255 / (arr.max() - arr.min())
-	return ((arr - arr.min()) * mult).astype(np.uint8)
+	return autocontrast(arr, 255).astype(np.uint8)
 
 def autocontrastedUint16(arr):
-	mult = 65535 / (arr.max() - arr.min())
-	return ((arr - arr.min()) * mult).astype(np.uint16)
+	return autocontrast(arr, 65535).astype(np.uint16)
+
+def skewMedianToCenter(arr):
+	center = (arr.min() + arr.max()) / 2
+	med = np.median(arr)
+	mult = (med / center)
+	return arr * (abs(arr / med) * mult)
 
 def measureLatLonInMeters(lat1, lon1, lat2, lon2):
 	R = 6378.137 # Radius of earth in KM
@@ -371,9 +385,14 @@ el_img = Image.fromarray(arr_eq.astype(np.uint8))
 print(el_img.mode, len(el_img.getcolors()))
 print(el_img.size)
 
-# colorize elevation data
 # pick hues
 ah = perceptuallyUniformRandomHue()
+if len(sys.argv) > 1:
+	# get a hue from the command line if possible
+	for arg in sys.argv[1:]:
+		argHue = asInt(arg)
+		if not argHue is None:
+			ah = argHue
 bh = ah
 while huesDeltaE(ah, bh) < 20 or huesDeltaE(ah, bh) > 40:
 	bh = perceptuallyUniformRandomHue()
@@ -401,18 +420,19 @@ for col in allSteps:
 	lch = col.convert('lch-d65')
 	highChromaSteps.append(highestChromaColor(lch.l, lch.h))
 i = highChromaSteps[0].interpolate(highChromaSteps[1:], space='lch-d65')
+# colorize elevation data
 color_el_img = colorizeWithInterpolation(el_img, i)
 
 # create hillshade
 # arrForShade = denoise_nl_means(arr, patch_size=11, patch_distance=21, h=2, fast_mode=True, preserve_range=True)
-# arrForShade = denoise_tv_chambolle(arr, weight=0.005)
 arrForShade = arr / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
+arrForShade = denoise_tv_chambolle(arrForShade, weight=0.05)
 lightHue = highChromaSteps[-1].convert('lch-d65').h
 print("for shade", arrForShade.shape, arrForShade.min(), arrForShade.max())
 shades = [
 	[350, 70, 0.9],
 	[15, 60, 0.7],
-	[270, 55, 1.0]
+	[270, 55, 1]
 ]
 slopeForShade, aspectForShade = hillshadePreparations(arrForShade)
 hsSum = None
@@ -423,39 +443,31 @@ for shade in shades:
 		hsSum = hs
 	else:
 		hsSum += hs
-hs_img = Image.fromarray(autocontrastedUint8(hsSum))
+hs = autocontrast(hsSum, 255)
+print(hs.min(), np.median(hs), hs.max())
+hs = hs + (127 - np.median(hs)) # linearly center median
+# print(np.count_nonzero(hs < 0), "pixels below 0")
+if hs.min() < 0:
+	# compress negative values
+	widthBelow = 127 - hs.min()
+	hs = np.where(hs < 128, hs - (hs.min() * ((widthBelow - (hs - hs.min())) / widthBelow)), hs)
+# print(np.count_nonzero(hs == 0), "pixels at 0")
+print(hs.min(), np.median(hs), hs.max())
+hs_img = Image.fromarray(hs.astype(np.uint8))
 print(hs_img.mode, len(hs_img.getcolors()))
 
-# colorize hillshade
-clist = []
-highChroma = 0
-for l in range(0, 51):
-	col = highestChromaColor(l, lightHue)
-	chroma = col.convert('lch-d65').c
-	if chroma > highChroma:
-		highChroma = chroma
-	if chroma < highChroma-1:
-		break
-	clist.append(col)
-clist.extend(clist[-1].steps('white', steps=99-l, space='lch-d65'))
-print(l)
-# clist = [highestChromaColor(20, aah), highestChromaColor(50, aah), highestChromaColor(95, aah)]
-ii = clist[0].interpolate(clist[1:], space='lch-d65')
-color_hs_img = colorizeWithInterpolation(hs_img, ii)
-
 # blend colorized elevation with hillshade
-# bw_hs_arr = np.array(hs_img.convert('RGBA'))
-color_hs_img = color_hs_img.convert('RGBA')
 color_el_arr = np.array(color_el_img.convert('RGBA'))
-hs_arr = np.array(color_hs_img)
-blended_float = multiply(hs_arr.astype(float), color_el_arr.astype(float), 1)
+hs_arr = np.array(hs_img.convert('RGBA'))
+blended_float = overlay(color_el_arr.astype(float), hs_arr.astype(float), 1)
+# blended_float = overlay(hs_arr.astype(float), color_el_arr.astype(float), 1)
 blended_arr = np.uint8(blended_float)
 blended_img = Image.fromarray(blended_arr)
 
 # save images
 # Image.fromarray(autocontrastedUint16(arr)).save(os.path.expanduser('~/color_out_of_earth/el16_img.png'))
 # el_img.save(os.path.expanduser('~/color_out_of_earth/el_img.png'))
-# hs_img.save(os.path.expanduser('~/color_out_of_earth/hs_img.png'))
+hs_img.save(os.path.expanduser('~/color_out_of_earth/hs_img.png'))
 # color_hs_img.save(os.path.expanduser('~/color_out_of_earth/color_hs_img.png'))
 color_el_img.save(os.path.expanduser('~/color_out_of_earth/color_el_img.png'))
 blended_img.save(os.path.expanduser('~/color_out_of_earth/blended_img.png'))
