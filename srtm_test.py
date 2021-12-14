@@ -13,7 +13,7 @@ from PIL import Image
 import math
 from zipfile import ZipFile
 import coloraide
-from blend_modes import multiply, overlay, soft_light, hard_light, darken_only
+from blend_modes import overlay #, multiply, soft_light, hard_light, darken_only
 import catacomb
 from getpass import getpass
 import requests
@@ -23,7 +23,8 @@ import sys
 import json
 from cv2 import resize, INTER_CUBIC
 from perceptual_hues_lavg import perceptualHues
-from skimage.restoration import denoise_nl_means, denoise_tv_chambolle
+# from skimage.restoration import denoise_nl_means, denoise_tv_chambolle
+import argparse
 
 degreesPerTheta = 90 / (math.pi / 2)
 maxChroma = 134
@@ -76,7 +77,7 @@ def highestChromaColor(lightness, hue):
 	while iteration < 45:
 		c = lch_to_rgb(lightness, chroma, hue)
 		if not c is None:
-			if chromaStep == 0.01 or maxChroma == 0:
+			if chromaStep == 0.01 or maxChroma == 0 or iteration == 0:
 				return c
 			else:
 				chroma += chromaStep
@@ -252,8 +253,9 @@ def randomSRTMlocation():
 	test = None
 	attempt = 0
 	while not test:
-		if attempt == 0 and len(sys.argv) > 2:
-			latitude, longitude = int(sys.argv[1]), int(sys.argv[2])
+		if attempt == 0:
+			if args.latitude and args.longitude:
+				latitude, longitude = args.latitude, args.longitude
 		else:
 			latitude, longitude = uniformlyRandomIntLatLon(-56, 59)
 		if latitude >= 0:
@@ -279,8 +281,19 @@ def downloadHGT(url, un, pw):
 	response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'}, stream=True)
 	return downloadResponseWithStatus(response2)
 
+def parseArguments():
+	parser = argparse.ArgumentParser()
+	parser.add_argument('--previous', '-p', action='store_true', help='Use previously downloaded tile.')
+	parser.add_argument('-latitude', '-lat', nargs='?', type=int, help='Integer latitude of desired tile.')
+	parser.add_argument('-longitude', '-lon', nargs='?', type=int, help='Integer longitude of desired tile.')
+	parser.add_argument('-hue', nargs='?', type=int, help='0-359. The first of three hues.')
+	parser.add_argument('-chroma', '-chr', nargs='?', type=int, default=134, help='0-134. Maximum chroma of image.')
+	return parser.parse_args()
+
+args = parseArguments()
+
 zip_file_name = None
-if len(sys.argv) > 1 and sys.argv[1] == 'previous' and os.path.exists(os.path.expanduser('~/color_out_of_earth/previous.txt')):
+if args.previous and os.path.exists(os.path.expanduser('~/color_out_of_earth/previous.txt')):
 	in_txt_file = open(os.path.expanduser('~/color_out_of_earth/previous.txt'), "r")
 	lines = in_txt_file.readlines()
 	locationCode, latitude, longitude = lines[0].strip(), int(lines[1].strip()), int(lines[2].strip())
@@ -387,12 +400,9 @@ print(el_img.size)
 
 # pick hues
 ah = perceptuallyUniformRandomHue()
-if len(sys.argv) > 1:
-	# get a hue from the command line if possible
-	for arg in sys.argv[1:]:
-		argHue = asInt(arg)
-		if not argHue is None:
-			ah = argHue
+if args.hue:
+	ah = args.hue
+
 bh = ah
 while huesDeltaE(ah, bh) < 20 or huesDeltaE(ah, bh) > 40:
 	bh = perceptuallyUniformRandomHue()
@@ -400,6 +410,9 @@ ch = bh
 while huesDeltaE(ch, ah) < 20 or huesDeltaE(ch, bh) < 20 or (huesDeltaE(ch, ah) > 40 and huesDeltaE(ch, bh) > 40):
 	ch = perceptuallyUniformRandomHue()
 print('hues', ah, bh, ch)
+if args.chroma:
+	print(args.chroma)
+	maxChroma = args.chroma
 # pick lightnesses
 darkMidLight = [random.randint(5,25), random.randint(40, 60), random.randint(75,95)]
 lOrders = [
@@ -414,6 +427,9 @@ print('lightnesses', *ls)
 a = highestChromaColor(ls[0], ah)
 b = highestChromaColor(ls[1], bh)
 c = highestChromaColor(ls[2], ch)
+print(a.convert('lch-d65'))
+print(b.convert('lch-d65'))
+print(c.convert('lch-d65'))
 allSteps = a.steps([b, c], steps=256, space='lch-d65')
 highChromaSteps = []
 for col in allSteps:
@@ -424,9 +440,9 @@ i = highChromaSteps[0].interpolate(highChromaSteps[1:], space='lch-d65')
 color_el_img = colorizeWithInterpolation(el_img, i)
 
 # create hillshade
-# arrForShade = denoise_nl_means(arr, patch_size=11, patch_distance=21, h=2, fast_mode=True, preserve_range=True)
 arrForShade = arr / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
-arrForShade = denoise_tv_chambolle(arrForShade, weight=0.05)
+# arrForShade = denoise_nl_means(arr, patch_size=11, patch_distance=21, h=2, fast_mode=True, preserve_range=True)
+# arrForShade = denoise_tv_chambolle(arrForShade, weight=0.05)
 lightHue = highChromaSteps[-1].convert('lch-d65').h
 print("for shade", arrForShade.shape, arrForShade.min(), arrForShade.max())
 shades = [
@@ -443,7 +459,7 @@ for shade in shades:
 		hsSum = hs
 	else:
 		hsSum += hs
-hs = autocontrast(hsSum, 255)
+hs = (0.95 * autocontrast(hsSum, 255)) + (0.1 * image_histogram_equalization(hsSum, 256))
 print(hs.min(), np.median(hs), hs.max())
 hs = hs + (127 - np.median(hs)) # linearly center median
 # print(np.count_nonzero(hs < 0), "pixels below 0")
@@ -452,6 +468,7 @@ if hs.min() < 0:
 	widthBelow = 127 - hs.min()
 	hs = np.where(hs < 128, hs - (hs.min() * ((widthBelow - (hs - hs.min())) / widthBelow)), hs)
 # print(np.count_nonzero(hs == 0), "pixels at 0")
+print(hs.min(), np.median(hs), hs.max())
 print(hs.min(), np.median(hs), hs.max())
 hs_img = Image.fromarray(hs.astype(np.uint8))
 print(hs_img.mode, len(hs_img.getcolors()))
