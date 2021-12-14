@@ -285,7 +285,8 @@ def parseArguments():
 	parser.add_argument('--previous', '-p', action='store_true', help='Use previously downloaded tile.')
 	parser.add_argument('-latitude', '-lat', nargs='?', type=int, help='Integer latitude of desired tile.')
 	parser.add_argument('-longitude', '-lon', nargs='?', type=int, help='Integer longitude of desired tile.')
-	parser.add_argument('-hue', nargs='?', type=int, help='0-359. The first of three hues.')
+	parser.add_argument('-lightnesses', '-ls', nargs='+', type=int, help='0-100. Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
+	parser.add_argument('-hues', '-hs', nargs='+', type=int, help='0-359. Up to three hues, in order of elevation. The remaining hues will be chosen randomly.')
 	parser.add_argument('-chroma', '-chr', nargs='?', type=int, default=134, help='0-134. Maximum chroma of image.')
 	return parser.parse_args()
 
@@ -398,16 +399,23 @@ print(el_img.mode, len(el_img.getcolors()))
 print(el_img.size)
 
 # pick hues
-ah = perceptuallyUniformRandomHue()
-if args.hue:
-	ah = args.hue
-
-bh = ah
-while huesDeltaE(ah, bh) < 20 or huesDeltaE(ah, bh) > 40:
-	bh = perceptuallyUniformRandomHue()
-ch = bh
-while huesDeltaE(ch, ah) < 20 or huesDeltaE(ch, bh) < 20 or (huesDeltaE(ch, ah) > 40 and huesDeltaE(ch, bh) > 40):
-	ch = perceptuallyUniformRandomHue()
+ah, bh, ch = None, None, None
+if args.hues:
+	ah = args.hues[0]
+	if len(args.hues) > 1:
+		bh = args.hues[1]
+	if len(args.hues) > 2:
+		ch = args.hues[2]
+if ah is None:
+	ah = perceptuallyUniformRandomHue()
+if bh is None:
+	bh = ah
+	while huesDeltaE(ah, bh) < 20 or huesDeltaE(ah, bh) > 40:
+		bh = perceptuallyUniformRandomHue()
+if ch is None:
+	ch = ah
+	while huesDeltaE(ch, ah) < 20 or huesDeltaE(ch, bh) < 20 or (huesDeltaE(ch, ah) > 40 and huesDeltaE(ch, bh) > 40):
+		ch = perceptuallyUniformRandomHue()
 print('hues:', ah, bh, ch)
 if args.chroma:
 	print('max chroma:', args.chroma)
@@ -420,7 +428,19 @@ lOrders = [
 	[1, 0, 2],
 	[0, 2, 1]]
 lOrder = random.choice(lOrders)
+if args.lightnesses:
+	if len(args.lightnesses) == 1:
+		lOrder = random.choice([lOrders[0], lOrders[3]])
+	if len(args.lightnesses) == 2:
+		lOrder = lOrders[0]
 ls = [darkMidLight[lOrder[0]], darkMidLight[lOrder[1]], darkMidLight[lOrder[2]]]
+if args.lightnesses:
+	if len(args.lightnesses) == 1:
+		ls = [args.lightnesses[0], ls[1], ls[2]]
+	elif len(args.lightnesses) == 2:
+		ls = [args.lightnesses[0], args.lightnesses[1], ls[2]]
+	elif len(args.lightnesses) == 3:
+		ls = args.lightnesses
 print('lightnesses:', *ls)
 # create gradient
 a = highestChromaColor(ls[0], ah)
