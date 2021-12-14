@@ -1,4 +1,5 @@
 import os
+import argparse
 from numpy import gradient
 from numpy import pi
 from numpy import arctan
@@ -24,10 +25,10 @@ import json
 from cv2 import resize, INTER_CUBIC
 from perceptual_hues_lavg import perceptualHues
 # from skimage.restoration import denoise_nl_means, denoise_tv_chambolle
-import argparse
+from skimage.filters.rank import mean_bilateral
+from skimage.morphology import disk, ball
 
 degreesPerTheta = 90 / (math.pi / 2)
-maxChroma = 134
 tileFilter = None # 'water' for only tiles with some water, 'land' for only tiles without water, None for no filter
 
 CurrentGrade = None
@@ -68,7 +69,7 @@ def rgb_to_lch(red, green, blue):
 		return c
 	return None
 
-def highestChromaColor(lightness, hue):
+def highestChromaColor(lightness, hue, maxChroma=134):
 	chromaStep = 10
 	if maxChroma < 10:
 		chromaStep = 1
@@ -167,6 +168,13 @@ def autocontrastedUint8(arr):
 def autocontrastedUint16(arr):
 	return autocontrast(arr, 65535).astype(np.uint16)
 
+def autocontrastedSingle(arr):
+	return (autocontrast(arr, 2) - 1).astype(np.single)
+
+def decontrast(arr, minValue, maxValue):
+	mult = (maxValue - minValue) / (arr.max() - arr.min())
+	return minValue + (arr * mult)
+
 def skewMedianToCenter(arr):
 	center = (arr.min() + arr.max()) / 2
 	med = np.median(arr)
@@ -236,18 +244,20 @@ def filterTile(locationCode, tileFilter):
 		return False
 
 def randomSRTMlocation():
-	# locCodes = {}
 	# https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json
-	# with open("srtm30m_bounding_boxes.json", "r") as read_file:
-	#     collection = json.load(read_file)
-	#     for f in collection.get('features'):
-	#         locCode = f.get('properties').get('dataFile').split('.')[0]
-	#         locCodes[locCode] = True
-	# with open('tile_list.json', 'w') as write_file:
-	#     json.dump(locCodes, write_file, indent='')
+	if not os.path.exists(os.path.expanduser('~/color_out_of_earth/tile_list.json')):
+		response = requests.get('https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json')
+		if response.status_code == 200:
+			locCodes = {}
+			collection = json.loads(response.text)
+			for f in collection.get('features'):
+				locCode = f.get('properties').get('dataFile').split('.')[0]
+				locCodes[locCode] = True
+			with open(os.path.expanduser('~/color_out_of_earth/tile_list.json'), 'w') as write_file:
+				json.dump(locCodes, write_file, indent='')
 
 	# load tile list
-	with open("tile_list.json", "r") as read_file:
+	with open(os.path.expanduser('~/color_out_of_earth/tile_list.json'), "r") as read_file:
 		locCodes = json.load(read_file)
 
 	test = None
@@ -283,11 +293,13 @@ def downloadHGT(url, un, pw):
 def parseArguments():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--previous', '-p', action='store_true', help='Use previously downloaded tile.')
+	parser.add_argument('-output', '-o', nargs='?', type=str, help='Path to save output image.')
 	parser.add_argument('-latitude', '-lat', nargs='?', type=int, help='Integer latitude of desired tile.')
 	parser.add_argument('-longitude', '-lon', nargs='?', type=int, help='Integer longitude of desired tile.')
 	parser.add_argument('-lightnesses', '-ls', nargs='+', type=int, help='0-100. Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
+	parser.add_argument('-chromas', '-cs', nargs='+', type=int, help='0-134. Up to three chromas, in order of elevation. The remaining chromas will be the maximum chroma')
 	parser.add_argument('-hues', '-hs', nargs='+', type=int, help='0-359. Up to three hues, in order of elevation. The remaining hues will be chosen randomly.')
-	parser.add_argument('-chroma', '-chr', nargs='?', type=int, default=134, help='0-134. Maximum chroma of image.')
+	parser.add_argument('-maxchroma', nargs='?', type=int, default=134, help='0-134. Maximum chroma of image.')
 	return parser.parse_args()
 
 args = parseArguments()
@@ -379,7 +391,7 @@ print("rotation", arr.shape, arr.min(), arr.max())
 if 0 in arr and arr.min() < 0:
 	arr = np.clip(arr, 0, None)
 	print(np.count_nonzero(arr<0))
-	print("clipped to ocean", arr.shape, arr.min(), arr.max())
+	print("clipped to ocean", arr.min(), arr.max())
 
 # compute slope to find water (flat areas)
 gy, gx = gradient(arr)
@@ -390,77 +402,17 @@ hasWater = np.count_nonzero(slope==0) > possible * 0.1
 print("slope from {} to {}, {:,} flat pixels of {:,} possible".format(slope.min(), slope.max(), np.count_nonzero(slope==0), possible))
 print("water?", hasWater)
 
-# convert equalized elevation data to 256-color grayscale image
-arr_eq = image_histogram_equalization(arr, 256)
-print("equalized", arr_eq.shape, arr_eq.min(), arr_eq.max())
-el_img = Image.fromarray(arr_eq.astype(np.uint8))
-# el_img = Image.fromarray(autocontrastedUint8(arr))
-print(el_img.mode, len(el_img.getcolors()))
-print(el_img.size)
-
-# pick hues
-ah, bh, ch = None, None, None
-if args.hues:
-	ah = args.hues[0]
-	if len(args.hues) > 1:
-		bh = args.hues[1]
-	if len(args.hues) > 2:
-		ch = args.hues[2]
-if ah is None:
-	ah = perceptuallyUniformRandomHue()
-if bh is None:
-	bh = ah
-	while huesDeltaE(ah, bh) < 20 or huesDeltaE(ah, bh) > 40:
-		bh = perceptuallyUniformRandomHue()
-if ch is None:
-	ch = ah
-	while huesDeltaE(ch, ah) < 20 or huesDeltaE(ch, bh) < 20 or (huesDeltaE(ch, ah) > 40 and huesDeltaE(ch, bh) > 40):
-		ch = perceptuallyUniformRandomHue()
-print('hues:', ah, bh, ch)
-if args.chroma:
-	print('max chroma:', args.chroma)
-	maxChroma = args.chroma
-# pick lightnesses
-darkMidLight = [random.randint(5,25), random.randint(40, 60), random.randint(75,95)]
-lOrders = [
-	[0, 1, 2],
-	[2, 0, 1],
-	[1, 0, 2],
-	[0, 2, 1]]
-lOrder = random.choice(lOrders)
-if args.lightnesses:
-	if len(args.lightnesses) == 1:
-		lOrder = random.choice([lOrders[0], lOrders[3]])
-	if len(args.lightnesses) == 2:
-		lOrder = lOrders[0]
-ls = [darkMidLight[lOrder[0]], darkMidLight[lOrder[1]], darkMidLight[lOrder[2]]]
-if args.lightnesses:
-	if len(args.lightnesses) == 1:
-		ls = [args.lightnesses[0], ls[1], ls[2]]
-	elif len(args.lightnesses) == 2:
-		ls = [args.lightnesses[0], args.lightnesses[1], ls[2]]
-	elif len(args.lightnesses) == 3:
-		ls = args.lightnesses
-print('lightnesses:', *ls)
-# create gradient
-a = highestChromaColor(ls[0], ah)
-b = highestChromaColor(ls[1], bh)
-c = highestChromaColor(ls[2], ch)
-allSteps = a.steps([b, c], steps=256, space='lch-d65')
-highChromaSteps = []
-for col in allSteps:
-	lch = col.convert('lch-d65')
-	highChromaSteps.append(highestChromaColor(lch.l, lch.h))
-i = highChromaSteps[0].interpolate(highChromaSteps[1:], space='lch-d65')
-# colorize elevation data
-color_el_img = colorizeWithInterpolation(el_img, i)
-
 # create hillshade
-arrForShade = arr / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
-# arrForShade = denoise_nl_means(arr, patch_size=11, patch_distance=21, h=2, fast_mode=True, preserve_range=True)
-# arrForShade = denoise_tv_chambolle(arrForShade, weight=0.05)
-lightHue = highChromaSteps[-1].convert('lch-d65').h
-print("for shade", arrForShade.shape, arrForShade.min(), arrForShade.max())
+oldMin, oldMax = arr.min(), arr.max()
+arrForFilter = autocontrast(arr, (oldMax - oldMin) * 15).astype(np.uint16)
+Image.fromarray(autocontrastedUint8(arr)).save(os.path.expanduser('~/color_out_of_earth/prefilter.png'))
+arrForShade = mean_bilateral(arrForFilter, disk(8), s0=20, s1=20)
+Image.fromarray(autocontrastedUint8(arrForShade)).save(os.path.expanduser('~/color_out_of_earth/postfilter.png'))
+print("filtered", arrForShade.min(), arrForShade.max())
+arrForShade = decontrast(arrForShade.astype(np.single), oldMin, oldMax)
+print("decontrasted", arrForShade.min(), arrForShade.max())
+arrForShade = arrForShade / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
+print("for shade", arrForShade.min(), arrForShade.max())
 shades = [
 	[350, 70, 0.9],
 	[15, 60, 0.7],
@@ -489,6 +441,91 @@ print(hs.min(), np.median(hs), hs.max())
 hs_img = Image.fromarray(hs.astype(np.uint8))
 print(hs_img.mode, len(hs_img.getcolors()))
 
+# convert equalized elevation data to 256-color grayscale image
+arr_eq = image_histogram_equalization(arr, 256)
+print("equalized", arr_eq.min(), arr_eq.max())
+el_img = Image.fromarray(arr_eq.astype(np.uint8))
+# el_img = Image.fromarray(autocontrastedUint8(arr))
+print(el_img.mode, len(el_img.getcolors()))
+print(el_img.size)
+
+# pick hues
+ah, bh, ch = None, None, None
+if args.hues:
+	ah = args.hues[0]
+	if len(args.hues) > 1:
+		bh = args.hues[1] 
+	if len(args.hues) > 2:
+		ch = args.hues[2]
+if ah is None:
+	ah = perceptuallyUniformRandomHue()
+if bh is None:
+	bh = ah
+	while huesDeltaE(ah, bh) < 20 or huesDeltaE(ah, bh) > 40:
+		bh = perceptuallyUniformRandomHue()
+if ch is None:
+	ch = ah
+	while huesDeltaE(ch, ah) < 20 or huesDeltaE(ch, bh) < 20 or (huesDeltaE(ch, ah) > 40 and huesDeltaE(ch, bh) > 40):
+		ch = perceptuallyUniformRandomHue()
+print('hues:', ah, bh, ch)
+
+# pick lightnesses
+darkMidLight = [random.randint(5,25), random.randint(40, 60), random.randint(75,95)]
+lOrders = [
+	[0, 1, 2],
+	[2, 0, 1],
+	[1, 0, 2],
+	[0, 2, 1]]
+lOrder = random.choice(lOrders)
+if args.lightnesses:
+	if len(args.lightnesses) == 1:
+		lOrder = random.choice([lOrders[0], lOrders[3]])
+	if len(args.lightnesses) == 2:
+		lOrder = lOrders[0]
+ls = [darkMidLight[lOrder[0]], darkMidLight[lOrder[1]], darkMidLight[lOrder[2]]]
+if args.lightnesses:
+	if len(args.lightnesses) == 1:
+		ls = [args.lightnesses[0], ls[1], ls[2]]
+	elif len(args.lightnesses) == 2:
+		ls = [args.lightnesses[0], args.lightnesses[1], ls[2]]
+	elif len(args.lightnesses) == 3:
+		ls = args.lightnesses
+print('lightnesses:', *ls)
+
+# create gradient
+chromas = [None, None, None]
+if args.chromas:
+	cIndex = 0
+	for chroma in args.chromas:
+		chromas[cIndex] = chroma
+		cIndex += 1
+if args.maxchroma:
+	chromas[0] = chromas[0] or args.maxchroma
+	chromas[1] = chromas[1] or args.maxchroma
+	chromas[2] = chromas[2] or args.maxchroma
+print('chromas:', chromas)
+a = highestChromaColor(ls[0], ah, chromas[0])
+b = highestChromaColor(ls[1], bh, chromas[1])
+c = highestChromaColor(ls[2], ch, chromas[2])
+allSteps = a.steps([b, c], steps=256, space='lch-d65')
+highChromaSteps = []
+sIndex = 0
+for col in allSteps:
+	lch = col.convert('lch-d65')
+	if sIndex > 127:
+		mult = (sIndex - 127) / 128
+		chroma = ((1-mult) * chromas[1]) + (mult * chromas[2])
+	else:
+		mult = sIndex / 127
+		chroma = ((1-mult) * chromas[0]) + (mult * chromas[1])
+	highChromaSteps.append(highestChromaColor(lch.l, lch.h, chroma))
+	# print(sIndex, highChromaSteps[-1].convert('lch-d65').c)
+	sIndex += 1
+i = highChromaSteps[0].interpolate(highChromaSteps[1:], space='lch-d65')
+
+# colorize elevation data
+color_el_img = colorizeWithInterpolation(el_img, i)
+
 # blend colorized elevation with hillshade
 color_el_arr = np.array(color_el_img.convert('RGBA'))
 hs_arr = np.array(hs_img.convert('RGBA'))
@@ -504,6 +541,12 @@ hs_img.save(os.path.expanduser('~/color_out_of_earth/hs_img.png'))
 # color_hs_img.save(os.path.expanduser('~/color_out_of_earth/color_hs_img.png'))
 color_el_img.save(os.path.expanduser('~/color_out_of_earth/color_el_img.png'))
 blended_img.save(os.path.expanduser('~/color_out_of_earth/blended_img.png'))
+if args.output:
+	if os.path.exists(os.path.split(args.output)[0]):
+		if os.path.splitext(args.output)[1] == '':
+			blended_img.save(args.output, format='PNG')
+		else:
+			blended_img.save(args.output)
 
 print("saved images")
 
