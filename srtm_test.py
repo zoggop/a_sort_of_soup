@@ -25,7 +25,7 @@ import json
 from cv2 import resize, INTER_CUBIC
 from perceptual_hues_lavg import perceptualHues
 # from skimage.restoration import denoise_nl_means, denoise_tv_chambolle
-from skimage.filters.rank import mean_bilateral
+import skimage.filters.rank as rank
 from skimage.morphology import disk, ball
 
 degreesPerTheta = 90 / (math.pi / 2)
@@ -402,17 +402,20 @@ hasWater = np.count_nonzero(slope==0) > possible * 0.1
 print("slope from {} to {}, {:,} flat pixels of {:,} possible".format(slope.min(), slope.max(), np.count_nonzero(slope==0), possible))
 print("water?", hasWater)
 
-# create hillshade
+# process elevation map for hillshading
 oldMin, oldMax = arr.min(), arr.max()
-arrForFilter = autocontrast(arr, (oldMax - oldMin) * 15).astype(np.uint16)
-Image.fromarray(autocontrastedUint8(arr)).save(os.path.expanduser('~/color_out_of_earth/prefilter.png'))
-arrForShade = mean_bilateral(arrForFilter, disk(8), s0=20, s1=20)
-Image.fromarray(autocontrastedUint8(arrForShade)).save(os.path.expanduser('~/color_out_of_earth/postfilter.png'))
+arrForFilter = autocontrast(arr, min(65535, (oldMax - oldMin) * 15)).astype(np.uint16)
+Image.fromarray(autocontrastedUint8(arr)).save(os.path.expanduser('~/color_out_of_earth/prefilter.tif'))
+arrForShade = rank.mean_bilateral(arrForFilter, disk(16), s0=50, s1=50)
+Image.fromarray(autocontrastedUint8(arrForShade)).save(os.path.expanduser('~/color_out_of_earth/postfilter.tif'))
 print("filtered", arrForShade.min(), arrForShade.max())
 arrForShade = decontrast(arrForShade.astype(np.single), oldMin, oldMax)
 print("decontrasted", arrForShade.min(), arrForShade.max())
 arrForShade = arrForShade / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
 print("for shade", arrForShade.min(), arrForShade.max())
+arr = arrForShade
+
+# create hillshade
 shades = [
 	[350, 70, 0.9],
 	[15, 60, 0.7],
@@ -532,15 +535,15 @@ hs_arr = np.array(hs_img.convert('RGBA'))
 blended_float = overlay(color_el_arr.astype(float), hs_arr.astype(float), 1)
 # blended_float = overlay(hs_arr.astype(float), color_el_arr.astype(float), 1)
 blended_arr = np.uint8(blended_float)
-blended_img = Image.fromarray(blended_arr)
+blended_img = Image.fromarray(blended_arr).convert('RGB')
 
 # save images
-# Image.fromarray(autocontrastedUint16(arr)).save(os.path.expanduser('~/color_out_of_earth/el16_img.png'))
-# el_img.save(os.path.expanduser('~/color_out_of_earth/el_img.png'))
-hs_img.save(os.path.expanduser('~/color_out_of_earth/hs_img.png'))
-# color_hs_img.save(os.path.expanduser('~/color_out_of_earth/color_hs_img.png'))
-color_el_img.save(os.path.expanduser('~/color_out_of_earth/color_el_img.png'))
-blended_img.save(os.path.expanduser('~/color_out_of_earth/blended_img.png'))
+# Image.fromarray(autocontrastedUint16(arr)).save(os.path.expanduser('~/color_out_of_earth/el16_img.tif'))
+# el_img.save(os.path.expanduser('~/color_out_of_earth/el_img.tif'))
+hs_img.save(os.path.expanduser('~/color_out_of_earth/hs_img.tif'))
+# color_hs_img.save(os.path.expanduser('~/color_out_of_earth/color_hs_img.tif'))
+color_el_img.save(os.path.expanduser('~/color_out_of_earth/color_el_img.tif'))
+blended_img.save(os.path.expanduser('~/color_out_of_earth/blended_img.tif'))
 if args.output:
 	if os.path.exists(os.path.split(args.output)[0]):
 		if os.path.splitext(args.output)[1] == '':
