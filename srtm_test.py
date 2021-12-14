@@ -253,11 +253,10 @@ def randomSRTMlocation():
 	test = None
 	attempt = 0
 	while not test:
+		latitude, longitude = uniformlyRandomIntLatLon(-56, 59)
 		if attempt == 0:
 			if args.latitude and args.longitude:
 				latitude, longitude = args.latitude, args.longitude
-		else:
-			latitude, longitude = uniformlyRandomIntLatLon(-56, 59)
 		if latitude >= 0:
 			latPrefix = 'N'
 		else:
@@ -409,9 +408,9 @@ while huesDeltaE(ah, bh) < 20 or huesDeltaE(ah, bh) > 40:
 ch = bh
 while huesDeltaE(ch, ah) < 20 or huesDeltaE(ch, bh) < 20 or (huesDeltaE(ch, ah) > 40 and huesDeltaE(ch, bh) > 40):
 	ch = perceptuallyUniformRandomHue()
-print('hues', ah, bh, ch)
+print('hues:', ah, bh, ch)
 if args.chroma:
-	print(args.chroma)
+	print('max chroma:', args.chroma)
 	maxChroma = args.chroma
 # pick lightnesses
 darkMidLight = [random.randint(5,25), random.randint(40, 60), random.randint(75,95)]
@@ -422,14 +421,11 @@ lOrders = [
 	[0, 2, 1]]
 lOrder = random.choice(lOrders)
 ls = [darkMidLight[lOrder[0]], darkMidLight[lOrder[1]], darkMidLight[lOrder[2]]]
-print('lightnesses', *ls)
+print('lightnesses:', *ls)
 # create gradient
 a = highestChromaColor(ls[0], ah)
 b = highestChromaColor(ls[1], bh)
 c = highestChromaColor(ls[2], ch)
-print(a.convert('lch-d65'))
-print(b.convert('lch-d65'))
-print(c.convert('lch-d65'))
 allSteps = a.steps([b, c], steps=256, space='lch-d65')
 highChromaSteps = []
 for col in allSteps:
@@ -459,7 +455,7 @@ for shade in shades:
 		hsSum = hs
 	else:
 		hsSum += hs
-hs = (0.95 * autocontrast(hsSum, 255)) + (0.1 * image_histogram_equalization(hsSum, 256))
+hs = (0.9 * autocontrast(hsSum, 255)) + (0.1 * image_histogram_equalization(hsSum, 256))
 print(hs.min(), np.median(hs), hs.max())
 hs = hs + (127 - np.median(hs)) # linearly center median
 # print(np.count_nonzero(hs < 0), "pixels below 0")
