@@ -543,7 +543,7 @@ blended_img = Image.fromarray(blended_arr).convert('RGB')
 hs_img.save(os.path.expanduser('~/color_out_of_earth/hs_img.tif'))
 # color_hs_img.save(os.path.expanduser('~/color_out_of_earth/color_hs_img.tif'))
 color_el_img.save(os.path.expanduser('~/color_out_of_earth/color_el_img.tif'))
-blended_img.save(os.path.expanduser('~/color_out_of_earth/blended_img.tif'))
+blended_img.save(os.path.expanduser('~/color_out_of_earth/blended_img.png'))
 if args.output:
 	if os.path.exists(os.path.split(args.output)[0]):
 		if os.path.splitext(args.output)[1] == '':
