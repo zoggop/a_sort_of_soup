@@ -2,7 +2,6 @@ import os
 import base64
 import traceback
 import pickle
-from getpass import getpass
 from pbkdf2 import PBKDF2
 from Crypto.Cipher import AES
 

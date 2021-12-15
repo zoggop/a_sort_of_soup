@@ -15,7 +15,6 @@ import math
 from zipfile import ZipFile
 import coloraide
 from blend_modes import overlay #, multiply, soft_light, hard_light, darken_only
-import catacomb
 from getpass import getpass
 import requests
 from io import BytesIO
@@ -23,12 +22,14 @@ import random
 import sys
 import json
 from cv2 import resize, INTER_CUBIC
-from perceptual_hues_lavg import perceptualHues
 # from skimage.restoration import denoise_nl_means, denoise_tv_chambolle
 import skimage.filters.rank as rank
 from skimage.morphology import disk, ball
 
-degreesPerTheta = 90 / (math.pi / 2)
+# local modules
+import catacomb
+from perceptual_hues_lavg import perceptualHues
+
 tileFilter = None # 'water' for only tiles with some water, 'land' for only tiles without water, None for no filter
 
 CurrentGrade = None
@@ -38,18 +39,6 @@ def asInt(intStr):
 		return int(intStr)
 	except:
 		return None
-
-def latitudeToZ(latitude):
-	theta = latitude / degreesPerTheta
-	return math.sin(theta)
-
-def uniformlyRandomIntLatLon(minLat, maxLat):
-	minZ, maxZ = latitudeToZ(minLat), latitudeToZ(maxLat)
-	# https://www.cs.cmu.edu/~mws/rpos.html
-	z = random.randint(int(1000 * minZ), int(1000 * maxZ)) / 1000
-	lat = math.asin(z) * degreesPerTheta
-	lon = random.randint(-180, 180)
-	return int(lat), lon
 
 def perceptuallyUniformRandomHue():
 	return random.choice(perceptualHues)
@@ -114,16 +103,6 @@ def colorizeWithInterpolation(bwImage, interpolation):
 	CurrentGrade = blueGrade
 	blueImage = Image.eval(bwImage, gradeFunc)
 	return Image.merge('RGB', (redImage, greenImage, blueImage))
-
-def rotateImage(img, rotation):
-	if rotation == 1:
-		return img.transpose(Image.ROTATE_90)
-	elif rotation == 2:
-		return img.transpose(Image.ROTATE_180)
-	elif rotation == 3:
-		return img.transpose(Image.ROTATE_270)
-	else:
-		return img
 
 def image_histogram_equalization(image, number_bins=65536):
 	# from http://www.janeriksolem.net/histogram-equalization-with-python-and.html
@@ -243,8 +222,19 @@ def filterTile(locationCode, tileFilter):
 		print("couldn't get preview")
 		return False
 
+def parseSRTMlocationCode(locationCode):
+	NS = locationCode[0]
+	latitude = int(locationCode[1:3])
+	EW = locationCode[3]
+	longitude = int(locationCode[4:7])
+	if NS == 'S':
+		latitude = 0 - latitude
+	if EW == 'W':
+		longitude = 0 - longitude
+	return latitude, longitude
+
 def randomSRTMlocation():
-	# https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json
+	# get source of tile list if one hasn't been yet generated
 	if not os.path.exists(os.path.expanduser('~/color_out_of_earth/tile_list.json')):
 		response = requests.get('https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json')
 		if response.status_code == 200:
@@ -255,31 +245,11 @@ def randomSRTMlocation():
 				locCodes[locCode] = True
 			with open(os.path.expanduser('~/color_out_of_earth/tile_list.json'), 'w') as write_file:
 				json.dump(locCodes, write_file, indent='')
-
 	# load tile list
 	with open(os.path.expanduser('~/color_out_of_earth/tile_list.json'), "r") as read_file:
 		locCodes = json.load(read_file)
-
-	test = None
-	attempt = 0
-	while not test:
-		latitude, longitude = uniformlyRandomIntLatLon(-56, 59)
-		if attempt == 0:
-			if args.latitude and args.longitude:
-				latitude, longitude = args.latitude, args.longitude
-		if latitude >= 0:
-			latPrefix = 'N'
-		else:
-			latPrefix = 'S'
-		if longitude >= 0:
-			lonPrefix = 'E'
-		else:
-			lonPrefix = 'W'
-		latString = latPrefix + '{0:02d}'.format(abs(latitude))
-		lonString = lonPrefix + '{0:03d}'.format(abs(longitude))
-		locationCode = latString + lonString
-		test = locCodes.get(locationCode) and filterTile(locationCode, tileFilter)
-		attempt += 1
+	locationCode = random.choice(list(locCodes))
+	latitude, longitude = parseSRTMlocationCode(locationCode)
 	print(locationCode)
 	return locationCode, latitude, longitude
 
@@ -297,7 +267,7 @@ def parseArguments():
 	parser.add_argument('-latitude', '-lat', nargs='?', type=int, help='Integer latitude of desired tile.')
 	parser.add_argument('-longitude', '-lon', nargs='?', type=int, help='Integer longitude of desired tile.')
 	parser.add_argument('-lightnesses', '-ls', nargs='+', type=int, help='0-100. Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
-	parser.add_argument('-chromas', '-cs', nargs='+', type=int, help='0-134. Up to three chromas, in order of elevation. The remaining chromas will be the maximum chroma')
+	parser.add_argument('-chromas', '-cs', nargs='+', type=int, help='0-134. Up to three chromas, in order of elevation. The remaining chromas will be chosen randomly.')
 	parser.add_argument('-hues', '-hs', nargs='+', type=int, help='0-359. Up to three hues, in order of elevation. The remaining hues will be chosen randomly.')
 	parser.add_argument('-maxchroma', nargs='?', type=int, default=134, help='0-134. Maximum chroma of image.')
 	return parser.parse_args()
@@ -411,9 +381,9 @@ Image.fromarray(autocontrastedUint8(arrForShade)).save(os.path.expanduser('~/col
 print("filtered", arrForShade.min(), arrForShade.max())
 arrForShade = decontrast(arrForShade.astype(np.single), oldMin, oldMax)
 print("decontrasted", arrForShade.min(), arrForShade.max())
+# arrForShade = arr
 arrForShade = arrForShade / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
 print("for shade", arrForShade.min(), arrForShade.max())
-arr = arrForShade
 
 # create hillshade
 shades = [
@@ -495,18 +465,18 @@ if args.lightnesses:
 		ls = args.lightnesses
 print('lightnesses:', *ls)
 
-# create gradient
+# pick chromas
 chromas = [None, None, None]
 if args.chromas:
 	cIndex = 0
 	for chroma in args.chromas:
 		chromas[cIndex] = chroma
-		cIndex += 1
-if args.maxchroma:
-	chromas[0] = chromas[0] or args.maxchroma
-	chromas[1] = chromas[1] or args.maxchroma
-	chromas[2] = chromas[2] or args.maxchroma
+		cIndex += 1	
+for cIndex in range(0, 3):
+	chromas[cIndex] = chromas[cIndex] or (random.randint(0,1) == 1 and random.randint(0, 134)) or args.maxchroma
 print('chromas:', chromas)
+
+# create gradient
 a = highestChromaColor(ls[0], ah, chromas[0])
 b = highestChromaColor(ls[1], bh, chromas[1])
 c = highestChromaColor(ls[2], ch, chromas[2])
