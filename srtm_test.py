@@ -25,6 +25,7 @@ from cv2 import resize, INTER_CUBIC
 # from skimage.restoration import denoise_nl_means, denoise_tv_chambolle
 import skimage.filters.rank as rank
 from skimage.morphology import disk, ball
+from scipy.ndimage import label, generate_binary_structure
 
 # local modules
 import catacomb
@@ -117,6 +118,10 @@ def image_histogram_equalization(image, number_bins=65536):
 
 	return image_equalized.reshape(image.shape)
 
+def slopeOfArray(array):
+	gy, gx = gradient(array)
+	return sqrt(gy*gy + gx*gx)
+
 def hillshadePreparations(array):
 	x, y = gradient(array)
 	slope = pi/2. - arctan(sqrt(x*x + y*y))
@@ -140,6 +145,9 @@ def hillshade(array, azimuth, angle_altitude, slope=None, aspect=None):
 def autocontrast(arr, maxValue):
 	mult = maxValue / (arr.max() - arr.min())
 	return (arr - arr.min()) * mult
+
+def autocontrastedBool(arr):
+	return autocontrast(arr, 1).astype(bool)
 
 def autocontrastedUint8(arr):
 	return autocontrast(arr, 255).astype(np.uint8)
@@ -233,6 +241,16 @@ def parseSRTMlocationCode(locationCode):
 		longitude = 0 - longitude
 	return latitude, longitude
 
+def latLonToSRTMlocationCode(latitude, longitude):
+	latitude, longitude = math.floor(latitude), math.floor(longitude)
+	NS = 'N'
+	if latitude < 0:
+		NS = 'S'
+	EW = 'E'
+	if longitude < 0:
+		EW = 'W'
+	return '{}{:02d}{}{:03d}'.format(NS, abs(latitude), EW, abs(longitude))
+
 def randomSRTMlocation():
 	# get source of tile list if one hasn't been yet generated
 	if not os.path.exists(os.path.expanduser('~/color_out_of_earth/tile_list.json')):
@@ -283,7 +301,12 @@ if args.previous and os.path.exists(os.path.expanduser('~/color_out_of_earth/pre
 	zip_file_name = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(locationCode))
 if zip_file_name is None:
 	username, password = getEOSDISlogin()
-	locationCode, latitude, longitude = randomSRTMlocation()
+	if args.latitude and args.longitude:
+		latitude, longitude = args.latitude, args.longitude
+		locationCode = latLonToSRTMlocationCode(latitude, longitude)
+		print(locationCode)
+	else:
+		locationCode, latitude, longitude = randomSRTMlocation()
 	zip_data = downloadHGT('http://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/{}.SRTMGL1.hgt.zip'.format(locationCode), username, password)
 
 # from 42 N to 43 N, 123 W to 122 W
@@ -347,42 +370,66 @@ y2 = y + heightBecomeCrop
 arr = arr[y:y2, x:x2]
 print("cropped", arr.shape, arr.min(), arr.max())
 
-# stretch and rotate elevation data
-# arr = arr.astype(np.int16)
 arr = arr.astype(np.single)
 print("astype", arr.shape, arr.min(), arr.max())
+
+Image.fromarray(autocontrastedUint8(arr)).save(os.path.expanduser('~/color_out_of_earth/el-cropped.tif'))
+
+# clip negative bits if this crop contains sea level
+if 0 in arr and arr.min() < 0:
+	arr = np.clip(arr, 0, None)
+	# print(np.count_nonzero(arr<0))
+	print("clipped to ocean", arr.min(), arr.max())
+
+# find water
+slope = slopeOfArray(arr)
+# Image.fromarray(autocontrastedUint8(slope)).save(os.path.expanduser('~/color_out_of_earth/slope.tif'))
+slopeFiltered = rank.maximum(autocontrastedUint8(slope), disk(4))
+# Image.fromarray(autocontrastedUint8(slopeFiltered)).save(os.path.expanduser('~/color_out_of_earth/slope-filtered.tif'))
+flat = slopeFiltered == 0
+Image.fromarray(flat).save(os.path.expanduser('~/color_out_of_earth/flat.tif'))
+labels, num_features = label(flat)
+# print(num_features, "flat areas")
+# Image.fromarray(labels).save(os.path.expanduser('~/color_out_of_earth/labels.tif'))
+water = None
+for label in range(1, num_features):
+	count = np.count_nonzero(labels==label)
+	if count > 200:
+		# print(label, count)
+		# waterLabels.append(labels==label)
+		thisLabel = labels == label
+		if water is None:
+			water = thisLabel
+		else:
+			water = water | thisLabel
+if not water is None:
+	Image.fromarray(water).save(os.path.expanduser('~/color_out_of_earth/water.tif'))
+	waterElevations = arr[water]
+	print("water elevations", waterElevations.min(), waterElevations.max())
+	# arr = np.clip(arr, waterElevations.min(), None)
+	# print("clipped to lowest water", arr.min(), arr.max())
+	# Image.fromarray(autocontrastedUint8(arr)).save(os.path.expanduser('~/color_out_of_earth/el-clipped.tif'))
+
+# stretch and rotate elevation data
 arr = resize(arr, dsize=(cropWidth, cropHeight), interpolation=INTER_CUBIC)
 print("resize", arr.shape, arr.min(), arr.max())
 if rotation > 0:
 	arr = np.rot90(arr, k=rotation)
 print("rotation", arr.shape, arr.min(), arr.max())
 
-# clip negative bits if this crop contains sea level
-if 0 in arr and arr.min() < 0:
-	arr = np.clip(arr, 0, None)
-	print(np.count_nonzero(arr<0))
-	print("clipped to ocean", arr.min(), arr.max())
-
-# compute slope to find water (flat areas)
-gy, gx = gradient(arr)
-slope = sqrt((gx*gx) + (gy*gy))
-# Image.fromarray(autocontrastedUint8(slope)).save(os.path.expanduser('~/color_out_of_earth/slope.png'))
-possible = (slope.shape[0] * slope.shape[1])
-hasWater = np.count_nonzero(slope==0) > possible * 0.1
-print("slope from {} to {}, {:,} flat pixels of {:,} possible".format(slope.min(), slope.max(), np.count_nonzero(slope==0), possible))
-print("water?", hasWater)
+Image.fromarray(autocontrastedUint8(arr)).save(os.path.expanduser('~/color_out_of_earth/el-resized.tif'))
 
 # process elevation map for hillshading
-oldMin, oldMax = arr.min(), arr.max()
-arrForFilter = autocontrast(arr, min(65535, (oldMax - oldMin) * 15)).astype(np.uint16)
-Image.fromarray(autocontrastedUint8(arr)).save(os.path.expanduser('~/color_out_of_earth/prefilter.tif'))
-arrForShade = rank.mean_bilateral(arrForFilter, disk(16), s0=50, s1=50)
-Image.fromarray(autocontrastedUint8(arrForShade)).save(os.path.expanduser('~/color_out_of_earth/postfilter.tif'))
-print("filtered", arrForShade.min(), arrForShade.max())
-arrForShade = decontrast(arrForShade.astype(np.single), oldMin, oldMax)
-print("decontrasted", arrForShade.min(), arrForShade.max())
+# oldMin, oldMax = arr.min(), arr.max()
+# arrForFilter = autocontrast(arr, min(65535, (oldMax - oldMin) * 15)).astype(np.uint16)
+# Image.fromarray(autocontrastedUint8(arr)).save(os.path.expanduser('~/color_out_of_earth/prefilter.tif'))
+# arrForShade = rank.mean_bilateral(arrForFilter, disk(16), s0=14, s1=14)
+# Image.fromarray(autocontrastedUint8(arrForShade)).save(os.path.expanduser('~/color_out_of_earth/postfilter.tif'))
+# print("filtered", arrForShade.min(), arrForShade.max())
+# arrForShade = decontrast(arrForShade.astype(np.single), oldMin, oldMax)
+# print("decontrasted", arrForShade.min(), arrForShade.max())
 # arrForShade = arr
-arrForShade = arrForShade / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
+arrForShade = arr / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
 print("for shade", arrForShade.min(), arrForShade.max())
 
 # create hillshade
@@ -415,9 +462,9 @@ hs_img = Image.fromarray(hs.astype(np.uint8))
 print(hs_img.mode, len(hs_img.getcolors()))
 
 # convert equalized elevation data to 256-color grayscale image
-arr_eq = image_histogram_equalization(arr, 256)
-print("equalized", arr_eq.min(), arr_eq.max())
-el_img = Image.fromarray(arr_eq.astype(np.uint8))
+# arr_eq = image_histogram_equalization(arr, 256)
+# print("equalized", arr_eq.min(), arr_eq.max())
+el_img = Image.fromarray(autocontrastedUint8(arr))
 # el_img = Image.fromarray(autocontrastedUint8(arr))
 print(el_img.mode, len(el_img.getcolors()))
 print(el_img.size)
@@ -509,7 +556,7 @@ blended_img = Image.fromarray(blended_arr).convert('RGB')
 
 # save images
 # Image.fromarray(autocontrastedUint16(arr)).save(os.path.expanduser('~/color_out_of_earth/el16_img.tif'))
-# el_img.save(os.path.expanduser('~/color_out_of_earth/el_img.tif'))
+el_img.save(os.path.expanduser('~/color_out_of_earth/el_img.tif'))
 hs_img.save(os.path.expanduser('~/color_out_of_earth/hs_img.tif'))
 # color_hs_img.save(os.path.expanduser('~/color_out_of_earth/color_hs_img.tif'))
 color_el_img.save(os.path.expanduser('~/color_out_of_earth/color_el_img.tif'))
