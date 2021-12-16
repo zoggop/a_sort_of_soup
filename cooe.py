@@ -254,6 +254,7 @@ def listFD(url, ext=''):
 def loadSRTMtileList():
 	# get source of tile list if one hasn't been yet generated
 	if not os.path.exists(os.path.expanduser('~/color_out_of_earth/srtm_tile_list.json')):
+		print('downloading SRTM tile list from https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json')
 		response = requests.get('https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json')
 		if response.status_code == 200:
 			locCodes = {}
@@ -273,6 +274,7 @@ def loadSRTMtileList():
 def loadASTERtileList():
 	# get source of tile list if one hasn't been yet generated
 	if not os.path.exists(os.path.expanduser('~/color_out_of_earth/aster_tile_list.json')):
+		print('downloading ASTER tile list from https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/')
 		locCodes = {}
 		for filename in listFD('https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/', 'zip'):
 			locCode = filename[-11:-4]
@@ -629,15 +631,16 @@ print("saved images")
 
 if not args.previous:
 	# delete previous zip and tif
-	if os.path.exists(os.path.expanduser('~/color_out_of_earth/previous.txt')):
-		in_txt_file = open(os.path.expanduser('~/color_out_of_earth/previous.txt'), "r")
+	prev_txt_path = os.path.expanduser('~/color_out_of_earth/previous.txt')
+	if os.path.exists(prev_txt_path):
+		in_txt_file = open(prev_txt_path, "r")
 		lines = in_txt_file.readlines()
 		prevLocCode, prevLat, prevLon = lines[0].strip(), int(lines[1].strip()), int(lines[2].strip())
 		if inSRTM:
-			zip_path = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(locationCode))
+			zip_path = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(prevLocCode))
 		elif inASTER:
-			zip_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}.zip'.format(locationCode))
-			tif_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}_dem.tif'.format(locationCode))
+			zip_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}.zip'.format(prevLocCode))
+			tif_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}_dem.tif'.format(prevLocCode))
 			if os.path.exists(tif_path):
 				os.remove(tif_path)
 		if os.path.exists(zip_path):
@@ -650,6 +653,6 @@ if not args.previous:
 	with open(zip_path, "wb") as zf:
 		zf.write(zip_data)
 	# save previous info
-	out_txt_file = open(os.path.expanduser('~/color_out_of_earth/previous.txt'), "w")
+	out_txt_file = open(prev_txt_path, "w")
 	out_txt_file.write("{}\n{}\n{}".format(locationCode, latitude, longitude))
 	out_txt_file.close()
