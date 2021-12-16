@@ -26,12 +26,11 @@ from cv2 import resize, INTER_CUBIC
 import skimage.filters.rank as rank
 from skimage.morphology import disk, ball
 from scipy.ndimage import label, generate_binary_structure
+from bs4 import BeautifulSoup
 
 # local modules
 import catacomb
 from perceptual_hues_lavg import perceptualHues
-
-tileFilter = None # 'water' for only tiles with some water, 'land' for only tiles without water, None for no filter
 
 CurrentGrade = None
 
@@ -197,40 +196,25 @@ def getEOSDISlogin():
 	return username, password
 
 def downloadResponseWithStatus(response):
-	totalkB = int(int(response.headers.get('Content-Length')) / 1024)
+	totalkB = None
+	if response.headers and response.headers.get('Content-Length'):
+		totalkB = int(int(response.headers.get('Content-Length')) / 1024)
 	kB = 0
 	content = b''
 	for chunk in response.iter_content(chunk_size=1024*10):
-		kB = min(kB + 10, totalkB)
-		percent = int((kB / totalkB) * 100)
-		sys.stdout.write("\r{}% ({} / {} kB)".format(percent, kB, totalkB))
+		kB = kB + 10
+		if not totalkB is None:
+			kB = min(kB, totalkB)
+			percent = int((kB / totalkB) * 100)
+			sys.stdout.write("\r{}% ({} / {} kB)".format(percent, kB, totalkB))
+		else:
+			sys.stdout.write("{} kB".format(kB))
 		sys.stdout.flush()
 		content += chunk
 	print(" ")
 	return content
 
-def filterTile(locationCode, tileFilter):
-	if tileFilter is None:
-		return True
-	previewURL = "https://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/{}.SRTMGL1.2.jpg".format(locationCode)
-	print("getting preview of", locationCode)
-	response = requests.get(previewURL)
-	if response.status_code == 200:
-		lengthBytes = int(response.headers.get('Content-Length'))
-		print(lengthBytes / 1024)
-		if lengthBytes < 400 * 1024:
-			# this tile has water
-			if tileFilter == 'water':
-				return True
-			elif tileFilter == 'land':
-				return False
-		else:
-			return False
-	else:
-		print("couldn't get preview")
-		return False
-
-def parseSRTMlocationCode(locationCode):
+def parseLocationCode(locationCode):
 	NS = locationCode[0]
 	latitude = int(locationCode[1:3])
 	EW = locationCode[3]
@@ -241,7 +225,7 @@ def parseSRTMlocationCode(locationCode):
 		longitude = 0 - longitude
 	return latitude, longitude
 
-def latLonToSRTMlocationCode(latitude, longitude):
+def latLonToLocationCode(latitude, longitude):
 	latitude, longitude = math.floor(latitude), math.floor(longitude)
 	NS = 'N'
 	if latitude < 0:
@@ -251,32 +235,42 @@ def latLonToSRTMlocationCode(latitude, longitude):
 		EW = 'W'
 	return '{}{:02d}{}{:03d}'.format(NS, abs(latitude), EW, abs(longitude))
 
-def randomSRTMlocation():
+def listFD(url, ext=''):
+    response = requests.get(url)
+    if response.status_code != 200:
+    	return []
+    soup = BeautifulSoup(response.text, 'html.parser')
+    return [url + '/' + node.get('href') for node in soup.find_all('a') if node.get('href').endswith(ext)]
+
+def randomASTERlocation():
 	# get source of tile list if one hasn't been yet generated
-	if not os.path.exists(os.path.expanduser('~/color_out_of_earth/tile_list.json')):
-		response = requests.get('https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json')
-		if response.status_code == 200:
-			locCodes = {}
-			collection = json.loads(response.text)
-			for f in collection.get('features'):
-				locCode = f.get('properties').get('dataFile').split('.')[0]
-				locCodes[locCode] = True
-			with open(os.path.expanduser('~/color_out_of_earth/tile_list.json'), 'w') as write_file:
+	if not os.path.exists(os.path.expanduser('~/color_out_of_earth/aster_tile_list.json')):
+		locCodes = {}
+		for filename in listFD('https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/', 'zip'):
+			locCode = filename[-11:-4]
+			locCodes[locCode] = True
+		with open(os.path.expanduser('~/color_out_of_earth/aster_tile_list.json'), 'w') as write_file:
 				json.dump(locCodes, write_file, indent='')
 	# load tile list
-	with open(os.path.expanduser('~/color_out_of_earth/tile_list.json'), "r") as read_file:
+	with open(os.path.expanduser('~/color_out_of_earth/aster_tile_list.json'), "r") as read_file:
 		locCodes = json.load(read_file)
 	locationCode = random.choice(list(locCodes))
-	latitude, longitude = parseSRTMlocationCode(locationCode)
+	latitude, longitude = parseLocationCode(locationCode)
 	print(locationCode)
 	return locationCode, latitude, longitude
 
-def downloadHGT(url, un, pw):
-	# print(url)
-	response = requests.get(url, auth = requests.auth.HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'})
-	print("redirected")
-	response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'}, stream=True)
-	return downloadResponseWithStatus(response2)
+def downloadZip(url, un, pw):
+	response = requests.get(url, auth = requests.auth.HTTPBasicAuth(un, pw), stream=True)
+	if response.status_code == 200:
+		return downloadResponseWithStatus(response2)
+	elif response.url:
+		print("redirected")
+		response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'}, stream=True)
+		if response2.status_code == 200:
+			return downloadResponseWithStatus(response2)
+		else:
+			print(response.status_code, "could not get", url)
+			return None
 
 def parseArguments():
 	parser = argparse.ArgumentParser()
@@ -292,22 +286,24 @@ def parseArguments():
 
 args = parseArguments()
 
-zip_file_name = None
+zip_data = None
+locationCode = None
 if args.previous and os.path.exists(os.path.expanduser('~/color_out_of_earth/previous.txt')):
 	in_txt_file = open(os.path.expanduser('~/color_out_of_earth/previous.txt'), "r")
 	lines = in_txt_file.readlines()
 	locationCode, latitude, longitude = lines[0].strip(), int(lines[1].strip()), int(lines[2].strip())
 	print(locationCode)
-	zip_file_name = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(locationCode))
-if zip_file_name is None:
+
+if locationCode is None:
 	username, password = getEOSDISlogin()
 	if args.latitude and args.longitude:
 		latitude, longitude = args.latitude, args.longitude
-		locationCode = latLonToSRTMlocationCode(latitude, longitude)
+		locationCode = latLonToLocationCode(latitude, longitude)
 		print(locationCode)
 	else:
-		locationCode, latitude, longitude = randomSRTMlocation()
-	zip_data = downloadHGT('http://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/{}.SRTMGL1.hgt.zip'.format(locationCode), username, password)
+		# locationCode, latitude, longitude = randomSRTMlocation()
+		locationCode, latitude, longitude = randomASTERlocation()
+	zip_data = downloadZip('https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_{}.zip'.format(locationCode), username, password)
 
 # from 42 N to 43 N, 123 W to 122 W
 
@@ -327,12 +323,11 @@ else:
 	cropHeight = screenHeight
 print("rotation:", rotation, cropWidth, cropHeight)
 
-with ZipFile(zip_file_name or BytesIO(zip_data), 'r') as zip:
-	with zip.open('{}.hgt'.format(locationCode), mode='r') as hgtFile:
-		raw = hgtFile.read()
-		siz = len(raw)
-		dim = int(math.sqrt(siz/2))
-		arr = np.frombuffer(raw, np.dtype('>i2'), dim*dim).reshape((dim, dim))
+
+if not zip_data is None:
+	with ZipFile(BytesIO(zip_data), 'r') as zip:
+		zip.extract('ASTGTMV003_{}_dem.tif'.format(locationCode), path=os.path.expanduser('~/color_out_of_earth'))
+arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}_dem.tif'.format(locationCode))))
 
 print(arr.shape)
 metersPerPixel = xMeters / arr.shape[1]
@@ -395,9 +390,6 @@ water = None
 for label in range(1, num_features+1):
 	count = np.count_nonzero(labels==label)
 	if count > 20:
-		print(count, label)
-		# print(label, count)
-		# waterLabels.append(labels==label)
 		thisLabel = labels == label
 		if water is None:
 			water = thisLabel
@@ -569,20 +561,17 @@ if args.output:
 
 print("saved images")
 
-if zip_file_name is None and not zip_data is None:
-	# delete previous zip file
+if not zip_data is None:
+	# delete previous tiff
 	if os.path.exists(os.path.expanduser('~/color_out_of_earth/previous.txt')):
 		in_txt_file = open(os.path.expanduser('~/color_out_of_earth/previous.txt'), "r")
 		lines = in_txt_file.readlines()
 		prevLocCode, prevLat, prevLon = lines[0].strip(), int(lines[1].strip()), int(lines[2].strip())
-		prevZipFilepath = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(prevLocCode))
-		if os.path.exists(prevZipFilepath):
-			os.remove(prevZipFilepath)
+		prevTifFilepath = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}_dem.tif'.format(prevLocCode))
+		if os.path.exists(prevTifFilepath):
+			os.remove(prevTifFilepath)
 			# print("deleted", prevZipFilepath)
-	# save zip file
-	out_file = open(os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(locationCode)), "wb")
-	out_file.write(zip_data)
-	out_file.close()
+	# save previous info
 	out_txt_file = open(os.path.expanduser('~/color_out_of_earth/previous.txt'), "w")
 	out_txt_file.write("{}\n{}\n{}".format(locationCode, latitude, longitude))
 	out_txt_file.close()

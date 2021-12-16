@@ -1,3 +1,6 @@
+https://earthdata.nasa.gov/learn/articles/new-aster-gdem
+https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/
+
 # http://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/N42W123.SRTMGL1.hgt.zip
 # https://urs.earthdata.nasa.gov/oauth/authorize?scope=uid&app_type=401&client_id=ijpRZvb9qeKCK5ctsn75Tg&response_type=code&redirect_uri=https%3A%2F%2Fe4ftl01.cr.usgs.gov%2Foauth&state=aHR0cHM6Ly9lNGZ0bDAxLmNyLnVzZ3MuZ292L01FQVNVUkVTL1NSVE1HTDEuMDAzLzIwMDAuMDIuMTEvTjQyVzEyMy5TUlRNR0wxLmhndC56aXA
 
