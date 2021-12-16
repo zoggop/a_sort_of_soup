@@ -34,6 +34,15 @@ from perceptual_hues_lavg import perceptualHues
 
 CurrentGrade = None
 
+degreesPerTheta = 90 / (math.pi / 2)
+
+def uniformlyRandomLatLon():
+	# https://www.cs.cmu.edu/~mws/rpos.html
+	z = random.randint(-10000000, 10000000) / 10000000
+	lat = math.asin(z) * degreesPerTheta
+	lon = random.randint(-18000000, 18000000) / 100000
+	return lat, lon
+
 def asInt(intStr):
 	try:
 		return int(intStr)
@@ -242,7 +251,26 @@ def listFD(url, ext=''):
     soup = BeautifulSoup(response.text, 'html.parser')
     return [url + '/' + node.get('href') for node in soup.find_all('a') if node.get('href').endswith(ext)]
 
-def randomASTERlocation():
+def loadSRTMtileList():
+	# get source of tile list if one hasn't been yet generated
+	if not os.path.exists(os.path.expanduser('~/color_out_of_earth/srtm_tile_list.json')):
+		response = requests.get('https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json')
+		if response.status_code == 200:
+			locCodes = {}
+			collection = json.loads(response.text)
+			for f in collection.get('features'):
+				locCode = f.get('properties').get('dataFile').split('.')[0]
+				locCodes[locCode] = True
+			with open(os.path.expanduser('~/color_out_of_earth/srtm_tile_list.json'), 'w') as write_file:
+				json.dump(locCodes, write_file, indent='')
+		else:
+			print('could not download', response.url)
+	# load tile list
+	with open(os.path.expanduser('~/color_out_of_earth/srtm_tile_list.json'), "r") as read_file:
+		locCodes = json.load(read_file)
+	return locCodes
+
+def loadASTERtileList():
 	# get source of tile list if one hasn't been yet generated
 	if not os.path.exists(os.path.expanduser('~/color_out_of_earth/aster_tile_list.json')):
 		locCodes = {}
@@ -254,8 +282,14 @@ def randomASTERlocation():
 	# load tile list
 	with open(os.path.expanduser('~/color_out_of_earth/aster_tile_list.json'), "r") as read_file:
 		locCodes = json.load(read_file)
-	locationCode = random.choice(list(locCodes))
-	latitude, longitude = parseLocationCode(locationCode)
+	return locCodes
+
+def randomTileLocation(SRTMlocationCodes, ASTERlocationCodes):
+	locationCode = ''
+	while not SRTMlocationCodes.get(locationCode) and not ASTERlocationCodes.get(locationCode):
+		latitude, longitude = uniformlyRandomLatLon()
+		latitude, longitude = math.floor(latitude), math.floor(longitude)
+		locationCode = latLonToLocationCode(latitude, longitude)
 	print(locationCode)
 	return locationCode, latitude, longitude
 
@@ -286,13 +320,25 @@ def parseArguments():
 
 args = parseArguments()
 
+SRTMlocationCodes = loadSRTMtileList()
+ASTERlocationCodes = loadASTERtileList()
+
 zip_data = None
 locationCode = None
 if args.previous and os.path.exists(os.path.expanduser('~/color_out_of_earth/previous.txt')):
 	in_txt_file = open(os.path.expanduser('~/color_out_of_earth/previous.txt'), "r")
 	lines = in_txt_file.readlines()
 	locationCode, latitude, longitude = lines[0].strip(), int(lines[1].strip()), int(lines[2].strip())
+	inSRTM, inASTER = SRTMlocationCodes.get(locationCode), ASTERlocationCodes.get(locationCode)
 	print(locationCode)
+	if inSRTM:
+		print('SRTM')
+		zip_path = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(locationCode))
+	elif inASTER:
+		print('ASTER')
+		zip_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}.zip'.format(locationCode))
+	with open(zip_path, "rb") as zf:
+		zip_data = zf.read()
 
 if locationCode is None:
 	username, password = getEOSDISlogin()
@@ -301,16 +347,29 @@ if locationCode is None:
 		locationCode = latLonToLocationCode(latitude, longitude)
 		print(locationCode)
 	else:
-		# locationCode, latitude, longitude = randomSRTMlocation()
-		locationCode, latitude, longitude = randomASTERlocation()
-	zip_data = downloadZip('https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_{}.zip'.format(locationCode), username, password)
+		locationCode, latitude, longitude = randomTileLocation(SRTMlocationCodes, ASTERlocationCodes)
+	inSRTM, inASTER = SRTMlocationCodes.get(locationCode), ASTERlocationCodes.get(locationCode)
+	if inSRTM:
+		print('SRTM')
+		url = 'http://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/{}.SRTMGL1.hgt.zip'.format(locationCode)
+	elif inASTER:
+		print('ASTER')
+		url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_{}.zip'.format(locationCode)
+	zip_data = downloadZip(url, username, password)
 
-# from 42 N to 43 N, 123 W to 122 W
+if zip_data is None:
+	print("no zip data")
+	exit()
 
 xMeters = measureLatLonInMeters(latitude + 0.5, longitude, latitude + 0.5, longitude + 1)
 yMeters = measureLatLonInMeters(latitude, longitude + 0.5, latitude + 1, longitude + 0.5)
 yMult = yMeters / xMeters
+xMult = 1
+if yMult > 2:
+	xMult = 0.5
+	yMult = yMult / 2
 print("y-axis multiplier:", yMult)
+print("x-axis multiplier:", xMult)
 
 screenWidth = 1920
 screenHeight = 1080
@@ -323,11 +382,17 @@ else:
 	cropHeight = screenHeight
 print("rotation:", rotation, cropWidth, cropHeight)
 
-
-if not zip_data is None:
+if inSRTM:
+	with ZipFile(BytesIO(zip_data), 'r') as zip:
+		with zip.open('{}.hgt'.format(locationCode), mode='r') as hgtFile:
+			raw = hgtFile.read()
+			siz = len(raw)
+			dim = int(math.sqrt(siz/2))
+			arr = np.frombuffer(raw, np.dtype('>i2'), dim*dim).reshape((dim, dim))
+elif inASTER:
 	with ZipFile(BytesIO(zip_data), 'r') as zip:
 		zip.extract('ASTGTMV003_{}_dem.tif'.format(locationCode), path=os.path.expanduser('~/color_out_of_earth'))
-arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}_dem.tif'.format(locationCode))))
+	arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}_dem.tif'.format(locationCode))))
 
 print(arr.shape)
 metersPerPixel = xMeters / arr.shape[1]
@@ -341,9 +406,10 @@ print("from {:,} m to {:,} m".format(arr.min(), arr.max()))
 nonZeroYs, nonZeroXs = np.nonzero(arr)
 print(nonZeroXs[0], nonZeroXs[-1], nonZeroYs[0], nonZeroYs[-1])
 heightBecomeCrop = round(cropHeight / yMult)
+widthBecomeCrop = round(cropWidth / xMult)
 acceptableOceanHeight = int(heightBecomeCrop / 2)
-acceptableOceanWidth = int(cropWidth / 2)
-xMax = arr.shape[1] - cropWidth
+acceptableOceanWidth = int(widthBecomeCrop / 2)
+xMax = arr.shape[1] - widthBecomeCrop
 yMax = arr.shape[0] - heightBecomeCrop
 xMax = max(0, min(nonZeroXs[-1] - acceptableOceanWidth, xMax))
 yMax = max(0, min(nonZeroYs[-1] - acceptableOceanHeight, yMax))
@@ -360,7 +426,7 @@ if yMax > yMin:
 	y = random.randint(yMin, yMax)
 else:
 	y = yMin
-x2 = x + cropWidth
+x2 = x + widthBecomeCrop
 y2 = y + heightBecomeCrop
 arr = arr[y:y2, x:x2]
 print("cropped", arr.shape, arr.min(), arr.max())
@@ -561,16 +627,28 @@ if args.output:
 
 print("saved images")
 
-if not zip_data is None:
-	# delete previous tiff
+if not args.previous:
+	# delete previous zip and tif
 	if os.path.exists(os.path.expanduser('~/color_out_of_earth/previous.txt')):
 		in_txt_file = open(os.path.expanduser('~/color_out_of_earth/previous.txt'), "r")
 		lines = in_txt_file.readlines()
 		prevLocCode, prevLat, prevLon = lines[0].strip(), int(lines[1].strip()), int(lines[2].strip())
-		prevTifFilepath = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}_dem.tif'.format(prevLocCode))
-		if os.path.exists(prevTifFilepath):
-			os.remove(prevTifFilepath)
-			# print("deleted", prevZipFilepath)
+		if inSRTM:
+			zip_path = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(locationCode))
+		elif inASTER:
+			zip_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}.zip'.format(locationCode))
+			tif_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}_dem.tif'.format(locationCode))
+			if os.path.exists(tif_path):
+				os.remove(tif_path)
+		if os.path.exists(zip_path):
+			os.remove(zip_path)
+	# save zip
+	if inSRTM:
+		zip_path = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(locationCode))
+	elif inASTER:
+		zip_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}.zip'.format(locationCode))
+	with open(zip_path, "wb") as zf:
+		zf.write(zip_data)
 	# save previous info
 	out_txt_file = open(os.path.expanduser('~/color_out_of_earth/previous.txt'), "w")
 	out_txt_file.write("{}\n{}\n{}".format(locationCode, latitude, longitude))
