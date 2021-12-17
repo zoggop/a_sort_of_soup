@@ -155,6 +155,29 @@ def hillshade(array, azimuth, angle_altitude, slope=None, aspect=None):
 	 * cos((azimuthrad - pi/2.) - aspect)
 	return 255*((shaded + 1)/2)
 
+def findWater(arr):
+	slope = slopeOfArray(arr)
+	# Image.fromarray(autocontrastedUint8(slope)).save(os.path.expanduser('~/color_out_of_earth/slope.tif'))
+	slopeFiltered = rank.maximum(autocontrastedUint8(slope), disk(4))
+	# Image.fromarray(autocontrastedUint8(slopeFiltered)).save(os.path.expanduser('~/color_out_of_earth/slope-filtered.tif'))
+	flat = slopeFiltered == 0
+	# Image.fromarray(flat).save(os.path.expanduser('~/color_out_of_earth/flat.tif'))
+	labels, num_features = label(flat)
+	# print(num_features, "flat areas")
+	# Image.fromarray(labels).save(os.path.expanduser('~/color_out_of_earth/labels.tif'))
+	water = None
+	for label in range(1, num_features+1):
+		count = np.count_nonzero(labels==label)
+		if count > 20:
+			thisLabel = labels == label
+			if water is None:
+				water = thisLabel
+			else:
+				water = water | thisLabel
+	if not water is None:
+		Image.fromarray(water).save(os.path.expanduser('~/color_out_of_earth/water.tif'))
+	return water
+
 def autocontrast(arr, maxValue):
 	mult = maxValue / (arr.max() - arr.min())
 	return (arr - arr.min()) * mult
@@ -455,46 +478,21 @@ print("astype", arr.shape, arr.min(), arr.max())
 if 0 in arr and arr.min() < 0:
 	arr = np.clip(arr, 0, None)
 	# print(np.count_nonzero(arr<0))
-	print("clipped to ocean", arr.min(), arr.max())
+	print("clipped to ocean", arr.shape, arr.min(), arr.max())
 
-# find water
+# restrict waterbody image to only those areas with 0 slope, so it doesn't cut off the hillshade
 slope = slopeOfArray(arr)
-# Image.fromarray(autocontrastedUint8(slope)).save(os.path.expanduser('~/color_out_of_earth/slope.tif'))
-slopeFiltered = rank.maximum(autocontrastedUint8(slope), disk(4))
-# Image.fromarray(autocontrastedUint8(slopeFiltered)).save(os.path.expanduser('~/color_out_of_earth/slope-filtered.tif'))
-flat = slopeFiltered == 0
-Image.fromarray(flat).save(os.path.expanduser('~/color_out_of_earth/flat.tif'))
-labels, num_features = label(flat)
-# print(num_features, "flat areas")
-# Image.fromarray(labels).save(os.path.expanduser('~/color_out_of_earth/labels.tif'))
-water = None
-for label in range(1, num_features+1):
-	count = np.count_nonzero(labels==label)
-	if count > 20:
-		thisLabel = labels == label
-		if water is None:
-			water = thisLabel
-		else:
-			water = water | thisLabel
-if not water is None:
-	Image.fromarray(water).save(os.path.expanduser('~/color_out_of_earth/water.tif'))
-	waterElevations = arr[water]
-	print("water elevations", waterElevations.min(), waterElevations.max())
-	# arr = np.clip(arr, waterElevations.min(), None)
-	# print("clipped to lowest water", arr.min(), arr.max())
-	# Image.fromarray(autocontrastedUint8(arr)).save(os.path.expanduser('~/color_out_of_earth/el-clipped.tif'))
-
-wbd_arr = autocontrastedUint8(wbd_arr)
+wbd_arr = (slope == 0) & (wbd_arr == wbd_arr.max())
+wbd_arr = autocontrastedUint8(wbd_arr.astype(np.uint8))
 
 # stretch and rotate elevation data
 arr = resize(arr, dsize=(cropWidth, cropHeight), interpolation=INTER_CUBIC)
-print(wbd_arr.shape, wbd_arr.min(), wbd_arr.max())
 wbd_arr = resize(wbd_arr, dsize=(cropWidth, cropHeight))
-print("resize", arr.shape, arr.min(), arr.max())
+print("resized", arr.shape, arr.min(), arr.max())
 if rotation > 0:
 	arr = np.rot90(arr, k=rotation)
 	wbd_arr = np.rot90(wbd_arr, k=rotation)
-print("rotation", arr.shape, arr.min(), arr.max())
+print("rotated", arr.shape, arr.min(), arr.max())
 
 # process elevation map for hillshading
 # oldMin, oldMax = arr.min(), arr.max()
@@ -537,14 +535,6 @@ print(hs.min(), np.median(hs), hs.max())
 print(hs.min(), np.median(hs), hs.max())
 hs_img = Image.fromarray(hs.astype(np.uint8))
 print(hs_img.mode, len(hs_img.getcolors()))
-
-# convert equalized elevation data to 256-color grayscale image
-# arr_eq = image_histogram_equalization(arr, 256)
-# print("equalized", arr_eq.min(), arr_eq.max())
-el_img = Image.fromarray(autocontrastedUint8(arr))
-# el_img = Image.fromarray(autocontrastedUint8(arr))
-print(el_img.mode, len(el_img.getcolors()))
-print(el_img.size)
 
 # pick hues
 ah, bh, ch = None, None, None
@@ -619,6 +609,13 @@ for col in allSteps:
 	# print(sIndex, highChromaSteps[-1].convert('lch-d65').c)
 	sIndex += 1
 i = highChromaSteps[0].interpolate(highChromaSteps[1:], space='lch-d65')
+
+# convert equalized elevation data to 256-color grayscale image
+# arr_eq = image_histogram_equalization(arr, 256)
+# print("equalized", arr_eq.min(), arr_eq.max())
+el_img = Image.fromarray(autocontrastedUint8(arr))
+print(el_img.mode, len(el_img.getcolors()))
+print(el_img.size)
 
 # colorize elevation data
 color_el_img = colorizeWithInterpolation(el_img, i)
