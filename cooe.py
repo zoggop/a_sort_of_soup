@@ -355,6 +355,8 @@ ASTERlocationCodes = loadASTERtileList()
 
 zip_data = None
 locationCode = None
+
+# read zip data from previous download
 if args.previous and os.path.exists(os.path.expanduser('~/color_out_of_earth/previous.txt')):
 	in_txt_file = open(os.path.expanduser('~/color_out_of_earth/previous.txt'), "r")
 	lines = in_txt_file.readlines()
@@ -372,6 +374,7 @@ if args.previous and os.path.exists(os.path.expanduser('~/color_out_of_earth/pre
 	with open(os.path.expanduser('~/color_out_of_earth/ASTWBDV001_{}.zip'.format(locationCode)), 'rb') as wzf:
 		wbd_zip_data = wzf.read()
 
+# download new zip data
 if locationCode is None:
 	username, password = getEOSDISlogin()
 	if args.latitude and args.longitude:
@@ -388,6 +391,7 @@ if locationCode is None:
 		print('ASTER')
 		url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_{}.zip'.format(locationCode)
 	zip_data = downloadZip(url, username, password)
+	print('ASTER WBD')
 	wbd_zip_data = downloadZip('https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_{}.zip'.format(locationCode), username, password)
 
 if zip_data is None:
@@ -482,7 +486,8 @@ if 0 in arr and arr.min() < 0:
 
 # restrict waterbody image to only those areas with 0 slope, so it doesn't cut off the hillshade
 slope = slopeOfArray(arr)
-wbd_arr = (slope == 0) & (wbd_arr == wbd_arr.max())
+Image.fromarray(autocontrastedUint8(slope)).save(os.path.expanduser('~/color_out_of_earth/slope.tif'))
+wbd_arr = (slope == 0) & (wbd_arr > wbd_arr.min())
 wbd_arr = autocontrastedUint8(wbd_arr.astype(np.uint8))
 
 # stretch and rotate elevation data
