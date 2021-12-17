@@ -637,7 +637,7 @@ print(el_img.size)
 color_el_img = colorizeWithInterpolation(el_img, i)
 
 # colorize water bodies
-waterColor = highestChromaColor(darkMidLight[random.randint(0,1)], random.choice([ah,bh,ch]))
+waterColor = highestChromaColor(darkMidLight[0], random.choice([bh,ch]))
 waterInterpol = coloraide.Color('srgb', [0, 0, 0], 0).interpolate(waterColor)
 wbd_img = Image.fromarray(wbd_arr).filter(ImageFilter.GaussianBlur(radius=0.67))
 color_wbd_img = colorizeWithInterpolation(wbd_img, waterInterpol, True)
