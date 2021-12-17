@@ -27,6 +27,8 @@ import skimage.filters.rank as rank
 from skimage.morphology import disk, ball
 from scipy.ndimage import label, generate_binary_structure
 from bs4 import BeautifulSoup
+import concurrent.futures
+from screeninfo import get_monitors
 
 # local modules
 import catacomb
@@ -323,7 +325,8 @@ def randomTileLocation(SRTMlocationCodes, ASTERlocationCodes):
 	print(locationCode)
 	return locationCode, latitude, longitude
 
-def downloadZip(url, un, pw):
+def downloadWithAuth(url, un, pw):
+	print(url)
 	response = requests.get(url, auth = requests.auth.HTTPBasicAuth(un, pw), stream=True)
 	if response.status_code == 200:
 		return downloadResponseWithStatus(response2)
@@ -332,9 +335,16 @@ def downloadZip(url, un, pw):
 		response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'}, stream=True)
 		if response2.status_code == 200:
 			return downloadResponseWithStatus(response2)
-		else:
-			print(response.status_code, "could not get", url)
-			return None
+
+def downloadOneFile(file):
+	try:
+		file['content'] = downloadWithAuth(file.get('url'), file.get('username'), file.get('password'))
+	except: 
+		print("Couldn't download", file.get('url'))
+
+def downloadFiles(files):
+	with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
+		executor.map(downloadOneFile, files)
 
 def parseArguments():
 	parser = argparse.ArgumentParser()
@@ -385,14 +395,15 @@ if locationCode is None:
 		locationCode, latitude, longitude = randomTileLocation(SRTMlocationCodes, ASTERlocationCodes)
 	inSRTM, inASTER = SRTMlocationCodes.get(locationCode), ASTERlocationCodes.get(locationCode)
 	if inSRTM:
-		print('SRTM')
 		url = 'http://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/{}.SRTMGL1.hgt.zip'.format(locationCode)
 	elif inASTER:
-		print('ASTER')
 		url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_{}.zip'.format(locationCode)
-	zip_data = downloadZip(url, username, password)
-	print('ASTER WBD')
-	wbd_zip_data = downloadZip('https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_{}.zip'.format(locationCode), username, password)
+	downloads = [{'url':url, 'username':username, 'password':password}]
+	downloads.append({'url':'https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_{}.zip'.format(locationCode), 'username':username, 'password':password})
+	downloadFiles(downloads)
+	zip_data = downloads[0].get('content')
+	wbd_zip_data = downloads[1].get('content')
+
 
 if zip_data is None:
 	print("no zip data")
