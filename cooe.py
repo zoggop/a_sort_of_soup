@@ -10,7 +10,7 @@ from numpy import sqrt
 from numpy import zeros
 from numpy import uint8
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 import math
 from zipfile import ZipFile
 import coloraide
@@ -94,7 +94,7 @@ def huesDeltaE(hueA, hueB):
 def gradeFunc(v):
 	return CurrentGrade[v]
 
-def colorizeWithInterpolation(bwImage, interpolation):
+def colorizeWithInterpolation(bwImage, interpolation, alpha=False):
 	global CurrentGrade
 	if bwImage.mode == 'L':
 		bits = 8
@@ -111,6 +111,11 @@ def colorizeWithInterpolation(bwImage, interpolation):
 	greenImage = Image.eval(bwImage, gradeFunc)
 	CurrentGrade = blueGrade
 	blueImage = Image.eval(bwImage, gradeFunc)
+	if alpha:
+		alphaGrade = [int(interpolation(l/divisor).alpha * 255) for l in range(numColors)]
+		CurrentGrade = alphaGrade
+		alphaImage = Image.eval(bwImage, gradeFunc)
+		return Image.merge('RGBA', (redImage, greenImage, blueImage, alphaImage))
 	return Image.merge('RGB', (redImage, greenImage, blueImage))
 
 def image_histogram_equalization(image, number_bins=65536):
@@ -339,8 +344,10 @@ if args.previous and os.path.exists(os.path.expanduser('~/color_out_of_earth/pre
 	elif inASTER:
 		print('ASTER')
 		zip_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}.zip'.format(locationCode))
-	with open(zip_path, "rb") as zf:
+	with open(zip_path, 'rb') as zf:
 		zip_data = zf.read()
+	with open(os.path.expanduser('~/color_out_of_earth/ASTWBDV001_{}.zip'.format(locationCode)), 'rb') as wzf:
+		wbd_zip_data = wzf.read()
 
 if locationCode is None:
 	username, password = getEOSDISlogin()
@@ -358,6 +365,7 @@ if locationCode is None:
 		print('ASTER')
 		url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_{}.zip'.format(locationCode)
 	zip_data = downloadZip(url, username, password)
+	wbd_zip_data = downloadZip('https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_{}.zip'.format(locationCode), username, password)
 
 if zip_data is None:
 	print("no zip data")
@@ -384,6 +392,7 @@ else:
 	cropHeight = screenHeight
 print("rotation:", rotation, cropWidth, cropHeight)
 
+# process downloaded zip data
 if inSRTM:
 	with ZipFile(BytesIO(zip_data), 'r') as zip:
 		with zip.open('{}.hgt'.format(locationCode), mode='r') as hgtFile:
@@ -395,6 +404,9 @@ elif inASTER:
 	with ZipFile(BytesIO(zip_data), 'r') as zip:
 		zip.extract('ASTGTMV003_{}_dem.tif'.format(locationCode), path=os.path.expanduser('~/color_out_of_earth'))
 	arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}_dem.tif'.format(locationCode))))
+with ZipFile(BytesIO(wbd_zip_data), 'r') as zip:
+		zip.extract('ASTWBDV001_{}_dem.tif'.format(locationCode), path=os.path.expanduser('~/color_out_of_earth'))
+wbd_arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/ASTWBDV001_{}_dem.tif'.format(locationCode))))
 
 print(arr.shape)
 metersPerPixel = xMeters / arr.shape[1]
@@ -431,6 +443,7 @@ else:
 x2 = x + widthBecomeCrop
 y2 = y + heightBecomeCrop
 arr = arr[y:y2, x:x2]
+wbd_arr = wbd_arr[y:y2, x:x2]
 print("cropped", arr.shape, arr.min(), arr.max())
 
 arr = arr.astype(np.single)
@@ -471,11 +484,16 @@ if not water is None:
 	# print("clipped to lowest water", arr.min(), arr.max())
 	# Image.fromarray(autocontrastedUint8(arr)).save(os.path.expanduser('~/color_out_of_earth/el-clipped.tif'))
 
+wbd_arr = autocontrastedUint8(wbd_arr)
+
 # stretch and rotate elevation data
 arr = resize(arr, dsize=(cropWidth, cropHeight), interpolation=INTER_CUBIC)
+print(wbd_arr.shape, wbd_arr.min(), wbd_arr.max())
+wbd_arr = resize(wbd_arr, dsize=(cropWidth, cropHeight))
 print("resize", arr.shape, arr.min(), arr.max())
 if rotation > 0:
 	arr = np.rot90(arr, k=rotation)
+	wbd_arr = np.rot90(wbd_arr, k=rotation)
 print("rotation", arr.shape, arr.min(), arr.max())
 
 # process elevation map for hillshading
@@ -605,6 +623,13 @@ i = highChromaSteps[0].interpolate(highChromaSteps[1:], space='lch-d65')
 # colorize elevation data
 color_el_img = colorizeWithInterpolation(el_img, i)
 
+# colorize water bodies
+waterColor = highestChromaColor(darkMidLight[random.randint(0,1)], random.choice([ah,bh,ch]))
+waterInterpol = coloraide.Color('srgb', [0, 0, 0], 0).interpolate(waterColor)
+wbd_img = Image.fromarray(wbd_arr).filter(ImageFilter.GaussianBlur(radius=0.67))
+color_wbd_img = colorizeWithInterpolation(wbd_img, waterInterpol, True)
+color_wbd_img.save(os.path.expanduser('~/color_out_of_earth/wbd.tif'))
+
 # blend colorized elevation with hillshade
 color_el_arr = np.array(color_el_img.convert('RGBA'))
 hs_arr = np.array(hs_img.convert('RGBA'))
@@ -612,6 +637,8 @@ blended_float = overlay(color_el_arr.astype(float), hs_arr.astype(float), 1)
 # blended_float = overlay(hs_arr.astype(float), color_el_arr.astype(float), 1)
 blended_arr = np.uint8(blended_float)
 blended_img = Image.fromarray(blended_arr).convert('RGB')
+
+blended_img = Image.alpha_composite(blended_img.convert('RGBA'), color_wbd_img)
 
 # save images
 # Image.fromarray(autocontrastedUint16(arr)).save(os.path.expanduser('~/color_out_of_earth/el16_img.tif'))
@@ -630,7 +657,7 @@ if args.output:
 print("saved images")
 
 if not args.previous:
-	# delete previous zip and tif
+	# delete previous zips and tif
 	prev_txt_path = os.path.expanduser('~/color_out_of_earth/previous.txt')
 	if os.path.exists(prev_txt_path):
 		in_txt_file = open(prev_txt_path, "r")
@@ -645,13 +672,18 @@ if not args.previous:
 				os.remove(tif_path)
 		if os.path.exists(zip_path):
 			os.remove(zip_path)
-	# save zip
+		wbd_zip_path = os.path.expanduser('~/color_out_of_earth/ASTWBDV001_{}.zip'.format(prevLocCode))
+		if os.path.exists(wbd_zip_path):
+			os.remove(wbd_zip_path)
+	# save zips
 	if inSRTM:
 		zip_path = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(locationCode))
 	elif inASTER:
 		zip_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}.zip'.format(locationCode))
-	with open(zip_path, "wb") as zf:
+	with open(zip_path, 'wb') as zf:
 		zf.write(zip_data)
+	with open(os.path.expanduser('~/color_out_of_earth/ASTWBDV001_{}.zip'.format(locationCode)), 'wb') as wzf:
+		wzf.write(wbd_zip_data)
 	# save previous info
 	out_txt_file = open(prev_txt_path, "w")
 	out_txt_file.write("{}\n{}\n{}".format(locationCode, latitude, longitude))
