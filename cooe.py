@@ -485,6 +485,8 @@ def parseArguments():
 	parser.add_argument('-hues', '-hs', nargs='+', type=int, help='0-359. Up to three hues, in order of elevation. The remaining hues will be chosen randomly.')
 	parser.add_argument('-maxchroma', nargs='?', type=int, default=134, help='0-134. Maximum chroma of image.')
 	parser.add_argument('-rotation', '-rot', '-r', nargs='?', type=int, help='0-3. How many times 90 degrees to rotate north.')
+	parser.add_argument('-width', nargs='?', type=int, help='Output image width in pixels.')
+	parser.add_argument('-height', nargs='?', type=int, help='Output image height in pixels.')
 	return parser.parse_args()
 
 args = parseArguments()
@@ -508,6 +510,12 @@ if args.previous and os.path.exists(os.path.expanduser('~/color_out_of_earth/pre
 		args.rotation = previousInfo.get('rotation')
 		args.latitude = previousInfo.get('latitude')
 		args.longitude = previousInfo.get('longitude')
+		args.width = previousInfo.get('width')
+		args.height = previousInfo.get('height')
+
+targetWidth = args.width or screenWidth
+targetHeight = args.height or screenHeight
+print("output dimensions:", targetWidth, targetHeight)
 
 # pick a random location or use specified coordinates
 codes = []
@@ -518,25 +526,25 @@ while attempt < 50 and (len(codes) == 0 or not checkOutLocationCodes(codes)):
 	if not args.rotation is None:
 		rotation = args.rotation
 	if rotation == 1 or rotation == 3:
-		cropWidth = screenHeight
-		cropHeight = screenWidth
+		rotatedWidth = targetHeight
+		rotatedHeight = targetWidth
 	else:
-		cropWidth = screenWidth
-		cropHeight = screenHeight
+		rotatedWidth = targetWidth
+		rotatedHeight = targetHeight
 	latitude, longitude = uniformlyRandomLatLon()
 	if args.latitude and (attempt == 0 or not args.longitude):
 		latitude = float(args.latitude)
 	if args.longitude and (attempt == 0 or not args.latitude):
 		longitude = float(args.longitude)
-	codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel = tileListCropStretchFromLatLonCenter(latitude, longitude, cropWidth, cropHeight)
+	codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel = tileListCropStretchFromLatLonCenter(latitude, longitude, rotatedWidth, rotatedHeight)
 print(latitude, longitude)
-print("rotation:", rotation, cropWidth, cropHeight)
+print("rotation:", rotation, rotatedWidth, rotatedHeight)
 print(codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel)
 
 if args.previous:
-	# use previously downloaded uncropped images
-	arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/elevation.tif')))
-	wbd_arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/waterbody.tif')))
+	# use previously downloaded cropped images
+	arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/elevation-cropped.tif')))
+	wbd_arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/waterbody-cropped.tif')))
 else:
 	# download and arrange tiles into images
 	username, password = getEOSDISlogin()
@@ -545,19 +553,16 @@ else:
 	layers = arrangeTiles(tiles)
 	arr = layers.get('elevation')
 	wbd_arr = layers.get('waterbody')
-	Image.fromarray(arr).save(os.path.expanduser('~/color_out_of_earth/elevation.tif'))
-	Image.fromarray(wbd_arr).save(os.path.expanduser('~/color_out_of_earth/waterbody.tif'))
-
-print(arr.shape)
-print("from {:,} m to {:,} m".format(arr.min(), arr.max()))
-
-# crop
-arr = arr[cropY1:cropY2, cropX1:cropX2]
-wbd_arr = wbd_arr[cropY1:cropY2, cropX1:cropX2]
-print("cropped", arr.shape, arr.min(), arr.max())
-
-Image.fromarray(arr).save(os.path.expanduser('~/color_out_of_earth/elevation-cropped.tif'))
-Image.fromarray(wbd_arr).save(os.path.expanduser('~/color_out_of_earth/waterbody-cropped.tif'))
+	# Image.fromarray(arr).save(os.path.expanduser('~/color_out_of_earth/elevation.tif'))
+	# Image.fromarray(wbd_arr).save(os.path.expanduser('~/color_out_of_earth/waterbody.tif'))
+	print(arr.shape)
+	print("from {:,} m to {:,} m".format(arr.min(), arr.max()))
+	# crop
+	arr = arr[cropY1:cropY2, cropX1:cropX2]
+	wbd_arr = wbd_arr[cropY1:cropY2, cropX1:cropX2]
+	print("cropped", arr.shape, arr.min(), arr.max())
+	Image.fromarray(arr).save(os.path.expanduser('~/color_out_of_earth/elevation-cropped.tif'))
+	Image.fromarray(wbd_arr).save(os.path.expanduser('~/color_out_of_earth/waterbody-cropped.tif'))
 
 arr = arr.astype(np.single)
 print("astype", arr.shape, arr.min(), arr.max())
@@ -577,8 +582,8 @@ wbd_arr = (slope == 0) & (wbd_arr > wbd_arr.min())
 wbd_arr = autocontrastedUint8(wbd_arr.astype(np.uint8))
 
 # stretch and rotate elevation data
-arr = resize(arr, dsize=(cropWidth, cropHeight), interpolation=INTER_CUBIC)
-wbd_arr = resize(wbd_arr, dsize=(cropWidth, cropHeight))
+arr = resize(arr, dsize=(rotatedWidth, rotatedHeight), interpolation=INTER_CUBIC)
+wbd_arr = resize(wbd_arr, dsize=(rotatedWidth, rotatedHeight))
 print("resized", arr.shape, arr.min(), arr.max())
 if rotation > 0:
 	arr = np.rot90(arr, k=rotation)
@@ -746,6 +751,6 @@ print("saved images")
 
 if not args.previous:
 	# save previous info
-	previousInfo = {'latitude':latitude, 'longitude':longitude, 'rotation':rotation, 'cropWidth':cropWidth, 'cropHeight':cropHeight}
+	previousInfo = {'latitude':latitude, 'longitude':longitude, 'rotation':rotation, 'width':targetWidth, 'height':targetHeight}
 	with open(os.path.expanduser('~/color_out_of_earth/previous.json'), 'w') as write_file:
 		json.dump(previousInfo, write_file, indent='')
