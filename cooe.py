@@ -602,15 +602,6 @@ if rotation > 0:
 print("rotated", arr.shape, arr.min(), arr.max())
 
 # process elevation map for hillshading
-# oldMin, oldMax = arr.min(), arr.max()
-# arrForFilter = autocontrast(arr, min(65535, (oldMax - oldMin) * 15)).astype(np.uint16)
-# Image.fromarray(autocontrastedUint8(arr)).save(os.path.expanduser('~/color_out_of_earth/prefilter.tif'))
-# arrForShade = rank.mean_bilateral(arrForFilter, disk(16), s0=14, s1=14)
-# Image.fromarray(autocontrastedUint8(arrForShade)).save(os.path.expanduser('~/color_out_of_earth/postfilter.tif'))
-# print("filtered", arrForShade.min(), arrForShade.max())
-# arrForShade = decontrast(arrForShade.astype(np.single), oldMin, oldMax)
-# print("decontrasted", arrForShade.min(), arrForShade.max())
-# arrForShade = arr
 arrForShade = arr / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
 print("for shade", arrForShade.min(), arrForShade.max())
 
@@ -624,7 +615,7 @@ slopeForShade, aspectForShade = hillshadePreparations(arrForShade)
 hsSum = None
 for shade in shades:
 	hs = hillshade(arrForShade, shade[0], shade[1], slopeForShade, aspectForShade) * shade[2]
-	# Image.fromarray(hs.astype(np.uint8)).save(os.path.expanduser('~/color_out_of_earth/hs-{}-{}-{}.png'.format(*shade)))
+	# Image.fromarray(hs.astype(np.uint8)).save(os.path.expanduser('~/color_out_of_earth/hs-{}-{}-{}.tif'.format(*shade)))
 	if hsSum is None:
 		hsSum = hs
 	else:
@@ -720,11 +711,11 @@ i = highChromaSteps[0].interpolate(highChromaSteps[1:], space='lch-d65')
 # convert elevation data to 256-color grayscale image
 # equalize data with a wide range
 if arr.max() - arr.min() > 100:
-	arr_eq = image_histogram_equalization(arr, 256)
+	arr_eq = (0.5 * image_histogram_equalization(arr, 256)) + (0.5 * autocontrast(arr, 255))
 else:
 	arr_eq = arr
-# print("equalized", arr_eq.min(), arr_eq.max())
-el_img = Image.fromarray(autocontrastedUint8(arr_eq))
+print("half equalized", arr_eq.min(), arr_eq.max())
+el_img = Image.fromarray(arr_eq.astype(np.uint8))
 print(el_img.mode, len(el_img.getcolors()))
 print(el_img.size)
 
