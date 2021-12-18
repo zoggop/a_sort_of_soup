@@ -109,8 +109,9 @@ def tileListCropStretchFromLatLonCenter(latitude, longitude, width, height):
 		latMin -= latMax - 90
 		latMax = 90
 	codes = {}
-	for corner in [[latMin, lonMin], [latMax, lonMin], [latMin, lonMax], [latMax, lonMax]]:
-		codes[latLonToLocationCode(corner[0], corner[1])] = True
+	for lat in range(math.floor(latMax), math.floor(latMin)-1, -1):
+			for lon in range(math.floor(lonMin), math.floor(lonMax)+1):
+				codes[latLonToLocationCode(lat, lon)] = True
 	cropX1 = int((lonMin - math.floor(lonMin)) * 3601)
 	cropX2 = cropX1 + cropWidth
 	cropY1 = int((math.ceil(latMax) - latMax) * 3601)
@@ -469,9 +470,19 @@ def arrangeTiles(downloads):
 	return outLayers
 
 def checkOutLocationCodes(codes):
+	codesHaveSRTM, codesHaveASTER = False, False
 	for code in codes:
-		if not SRTMlocationCodes.get(code) and not ASTERlocationCodes.get(code):
+		inSRTM = SRTMlocationCodes.get(code)
+		inASTER = ASTERlocationCodes.get(code)
+		if not inSRTM and not inASTER:
 			return False
+		if inSRTM and not codesHaveSRTM:
+			codesHaveSRTM = inSRTM
+		if inASTER and not inSRTM and not codesHaveASTER:
+			codesHaveASTER = inASTER
+	if codesHaveSRTM and codesHaveASTER:
+		# SRTM tiles and ASTER tiles don't line up perfectly and show a seam when put together
+		return False
 	return True
 
 def parseArguments():
@@ -521,7 +532,7 @@ print("output dimensions:", targetWidth, targetHeight)
 codes = []
 attempt = 0
 while attempt < 50 and (len(codes) == 0 or not checkOutLocationCodes(codes)):
-	# rotate to get crop dimensions
+	# rotate to get pre-rotated target dimensions
 	rotation = random.randint(0, 3)
 	if not args.rotation is None:
 		rotation = args.rotation
@@ -706,10 +717,14 @@ for col in allSteps:
 	sIndex += 1
 i = highChromaSteps[0].interpolate(highChromaSteps[1:], space='lch-d65')
 
-# convert equalized elevation data to 256-color grayscale image
-# arr_eq = image_histogram_equalization(arr, 256)
+# convert elevation data to 256-color grayscale image
+# equalize data with a wide range
+if arr.max() - arr.min() > 100:
+	arr_eq = image_histogram_equalization(arr, 256)
+else:
+	arr_eq = arr
 # print("equalized", arr_eq.min(), arr_eq.max())
-el_img = Image.fromarray(autocontrastedUint8(arr))
+el_img = Image.fromarray(autocontrastedUint8(arr_eq))
 print(el_img.mode, len(el_img.getcolors()))
 print(el_img.size)
 
@@ -729,9 +744,9 @@ hs_arr = np.array(hs_img.convert('RGBA'))
 blended_float = overlay(color_el_arr.astype(float), hs_arr.astype(float), 1)
 # blended_float = overlay(hs_arr.astype(float), color_el_arr.astype(float), 1)
 blended_arr = np.uint8(blended_float)
-blended_img = Image.fromarray(blended_arr).convert('RGB')
+blended_img = Image.fromarray(blended_arr)
 
-blended_img = Image.alpha_composite(blended_img.convert('RGBA'), color_wbd_img)
+blended_img = Image.alpha_composite(blended_img, color_wbd_img).convert('RGB')
 
 # save images
 # Image.fromarray(autocontrastedUint16(arr)).save(os.path.expanduser('~/color_out_of_earth/el16_img.tif'))
