@@ -35,6 +35,7 @@ import catacomb
 from perceptual_hues_lavg import perceptualHues
 
 CurrentGrade = None
+CurrentlyDownloadingFiles = []
 
 degreesPerTheta = 90 / (math.pi / 2)
 
@@ -88,10 +89,10 @@ def xyMultAtLatLon(latitude, longitude, size=1):
 
 def tileListCropStretchFromLatLonCenter(latitude, longitude, width, height):
 	xMult, yMult, xMeters, yMeters = xyMultAtLatLon(latitude, longitude, 1)
-	xPixelsPerLon = 3601 * xMult
-	yPixelsPerLat = 3601 * yMult
-	lonWidth = width / xPixelsPerLon
-	latHeight = height / yPixelsPerLat
+	cropWidth = int(width / xMult)
+	cropHeight = int(height / yMult)
+	lonWidth = cropWidth / 3601
+	latHeight = cropHeight / 3601
 	lonMin = longitude - (lonWidth / 2)
 	if lonMin < -180:
 		lonMin += 360
@@ -100,20 +101,22 @@ def tileListCropStretchFromLatLonCenter(latitude, longitude, width, height):
 		lonMax -= 360
 	latMin = latitude - (latHeight / 2)
 	latMax = latitude + (latHeight / 2)
-	if latMin < 0:
-		latMax -= latMin
-		latMin = 0
+	if latMin < -90:
+		latMax -= 90 + latMin
+		latMin = -90
 	if latMax > 90:
 		latMin -= latMax - 90
 		latMax = 90
 	codes = {}
 	for corner in [[latMin, lonMin], [latMax, lonMin], [latMin, lonMax], [latMax, lonMax]]:
 		codes[latLonToLocationCode(corner[0], corner[1])] = True
-	cropX1 = int((lonMin - math.floor(lonMin)) * xPixelsPerLon)
-	cropX2 = cropX1 + int(width / xMult)
-	cropY1 = int((latMin - math.floor(latMin)) * yPixelsPerLat)
-	cropY2 = cropY1 + int(height / yMult)
-	metersPerPixel = xMeters / xPixelsPerLon
+	print(latMin, latMax, lonMin, lonMax)
+	cropX1 = int((lonMin - math.floor(lonMin)) * 3601)
+	cropX2 = cropX1 + cropWidth
+	cropY1 = int((math.ceil(latMax) - latMax) * 3601)
+	cropY2 = cropY1 + cropHeight
+	print(cropX1, cropX2, cropY1, cropY2)
+	metersPerPixel = xMeters / 3601
 	return [*codes], cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel
 
 def asInt(intStr):
@@ -296,7 +299,15 @@ def getEOSDISlogin():
 		password = comb.decrypt(username)
 	return username, password
 
-def downloadResponseWithStatus(response):
+def printDownloadStatus(overwrite=True):
+	if overwrite == True:
+		for d in CurrentlyDownloadingFiles:
+			sys.stdout.write("\033[F")
+	for d in CurrentlyDownloadingFiles:
+		sys.stdout.write("{} {} {}\n".format(d.get('code'), d.get('layer'), d.get('status') or ''))
+	# sys.stdout.flush()
+
+def downloadResponseWithStatus(response, download):
 	totalkB = None
 	if response.headers and response.headers.get('Content-Length'):
 		totalkB = int(int(response.headers.get('Content-Length')) / 1024)
@@ -307,12 +318,11 @@ def downloadResponseWithStatus(response):
 		if not totalkB is None:
 			kB = min(kB, totalkB)
 			percent = int((kB / totalkB) * 100)
-			sys.stdout.write("\r{}% ({} / {} kB)".format(percent, kB, totalkB))
+			download['status'] = "{}% ({} / {} kB)".format(percent, kB, totalkB)
 		else:
-			sys.stdout.write("{} kB".format(kB))
-		sys.stdout.flush()
+			download['status'] = "{} kB".format(kB)
+		printDownloadStatus()
 		content += chunk
-	print(" ")
 	return content
 
 def listFD(url, ext=''):
@@ -357,29 +367,24 @@ def loadASTERtileList():
 		locCodes = json.load(read_file)
 	return locCodes
 
-def randomTileLocation(SRTMlocationCodes, ASTERlocationCodes):
-	locationCode = ''
-	while not SRTMlocationCodes.get(locationCode) and not ASTERlocationCodes.get(locationCode):
-		latitude, longitude = uniformlyRandomLatLon()
-		latitude, longitude = math.floor(latitude), math.floor(longitude)
-		locationCode = latLonToLocationCode(latitude, longitude)
-	print(locationCode)
-	return locationCode, latitude, longitude
-
-def downloadWithAuth(url, un, pw):
-	print(url)
+def downloadWithAuth(url, un, pw, download):
 	response = requests.get(url, auth = requests.auth.HTTPBasicAuth(un, pw), stream=True)
 	if response.status_code == 200:
-		return downloadResponseWithStatus(response2)
+		return downloadResponseWithStatus(response2, download)
 	elif response.url:
-		print("redirected")
+		download['status'] = 'redirected'
+		printDownloadStatus()
 		attempt = 1
 		response2 = None
 		while response2 is None or response2.status_code != 200:
-			response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'}, stream=True)
-			print(attempt, response2.status_code)
+			try:
+				response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'}, stream=True)
+			except:
+				response2 = None
+			download['status'] = "response {}".format(attempt)
+			printDownloadStatus()
 			attempt += 1
-		return downloadResponseWithStatus(response2)
+		return downloadResponseWithStatus(response2, download)
 
 def extractFile(file):
 	if file.get('zipped'):
@@ -395,10 +400,13 @@ def extractFile(file):
 					file['array'] = np.array(Image.open(BytesIO(zippedFile.read())))
 
 def downloadOneFile(file):
-	file['content'] = downloadWithAuth(file.get('url'), file.get('username'), file.get('password'))
+	file['content'] = downloadWithAuth(file.get('url'), file.get('username'), file.get('password'), file)
 
 def downloadFiles(files):
-	with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+	global CurrentlyDownloadingFiles
+	CurrentlyDownloadingFiles = files
+	printDownloadStatus(False)
+	with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
 		executor.map(downloadOneFile, files)
 
 def downloadTiles(codes, username, password):
@@ -443,7 +451,7 @@ def arrangeTiles(downloads):
 	for layer in layers.keys():
 		thisLayer = layers.get(layer)
 		rows = None
-		for lat in range(latMin, latMax+1):
+		for lat in range(latMax, latMin-1, -1):
 			row = None
 			for lon in range(lonMin, lonMax+1):
 				tileArr = thisLayer.get('lats').get(lat).get(lon)
@@ -468,12 +476,13 @@ def parseArguments():
 	parser = argparse.ArgumentParser()
 	parser.add_argument('--previous', '-p', action='store_true', help='Use previously downloaded tile.')
 	parser.add_argument('-output', '-o', nargs='?', type=str, help='Path to save output image.')
-	parser.add_argument('-latitude', '-lat', nargs='?', type=int, help='Integer latitude of desired tile.')
-	parser.add_argument('-longitude', '-lon', nargs='?', type=int, help='Integer longitude of desired tile.')
+	parser.add_argument('-latitude', '-lat', nargs='?', type=float, help='Integer latitude of desired tile.')
+	parser.add_argument('-longitude', '-lon', nargs='?', type=float, help='Integer longitude of desired tile.')
 	parser.add_argument('-lightnesses', '-ls', nargs='+', type=int, help='0-100. Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
 	parser.add_argument('-chromas', '-cs', nargs='+', type=int, help='0-134. Up to three chromas, in order of elevation. The remaining chromas will be chosen randomly.')
 	parser.add_argument('-hues', '-hs', nargs='+', type=int, help='0-359. Up to three hues, in order of elevation. The remaining hues will be chosen randomly.')
 	parser.add_argument('-maxchroma', nargs='?', type=int, default=134, help='0-134. Maximum chroma of image.')
+	parser.add_argument('-rotation', '-rot', '-r', nargs='?', type=int, help='0-3. How many times 90 degrees to rotate north.')
 	return parser.parse_args()
 
 args = parseArguments()
@@ -490,39 +499,66 @@ for m in get_monitors():
 		screenHeight = m.height
 print("screen:", screenWidth, screenHeight)
 
-# rotate to get crop dimensions
-rotation = random.randint(0, 3)
-if rotation == 1 or rotation == 3:
-	cropWidth = screenHeight
-	cropHeight = screenWidth
-else:
-	cropWidth = screenWidth
-	cropHeight = screenHeight
-print("rotation:", rotation, cropWidth, cropHeight)
+if args.previous and os.path.exists(os.path.expanduser('~/color_out_of_earth/previous.json')):
+	# get previous info if asked for and exists
+	with open(os.path.expanduser('~/color_out_of_earth/previous.json'), "r") as read_file:
+		previousInfo = json.load(read_file)
+		args.rotation = previousInfo.get('rotation')
+		args.latitude = previousInfo.get('latitude')
+		args.longitude = previousInfo.get('longitude')
+		print(args)
 
-# pick a random location
+# pick a random location or use specified coordinates
 codes = []
-while len(codes) == 0 or len(codes) < 2 or not checkOutLocationCodes(codes):
-	codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel = tileListCropStretchFromLatLonCenter(*uniformlyRandomLatLon(), cropWidth, cropHeight)
+attempt = 0
+print("args latlon", args.latitude, args.longitude)
+while attempt < 50 and (len(codes) == 0 or not checkOutLocationCodes(codes)):
+	# rotate to get crop dimensions
+	rotation = random.randint(0, 3)
+	if not args.rotation is None:
+		rotation = args.rotation
+	if rotation == 1 or rotation == 3:
+		cropWidth = screenHeight
+		cropHeight = screenWidth
+	else:
+		cropWidth = screenWidth
+		cropHeight = screenHeight
+	latitude, longitude = uniformlyRandomLatLon()
+	if args.latitude and (attempt == 0 or not args.longitude):
+		latitude = float(args.latitude)
+	if args.longitude and (attempt == 0 or not args.latitude):
+		longitude = float(args.longitude)
+	print(latitude, longitude)
+	codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel = tileListCropStretchFromLatLonCenter(latitude, longitude, cropWidth, cropHeight)
+print(latitude, longitude)
+print("rotation:", rotation, cropWidth, cropHeight)
 print(codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel)
 
-# download and arrange tiles into images
-username, password = getEOSDISlogin()
-tiles = downloadTiles(codes, username, password)
-extractTiles(tiles)
-layers = arrangeTiles(tiles)
-arr = layers.get('elevation')
-wbd_arr = layers.get('waterbody')
-Image.fromarray(arr).save(os.path.expanduser('~/color_out_of_earth/elevation.tif'))
-Image.fromarray(wbd_arr).save(os.path.expanduser('~/color_out_of_earth/waterbody.tif'))
+if args.previous:
+	# use previously downloaded uncropped images
+	arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/elevation.tif')))
+	wbd_arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/waterbody.tif')))
+else:
+	# download and arrange tiles into images
+	username, password = getEOSDISlogin()
+	tiles = downloadTiles(codes, username, password)
+	extractTiles(tiles)
+	layers = arrangeTiles(tiles)
+	arr = layers.get('elevation')
+	wbd_arr = layers.get('waterbody')
+	Image.fromarray(arr).save(os.path.expanduser('~/color_out_of_earth/elevation.tif'))
+	Image.fromarray(wbd_arr).save(os.path.expanduser('~/color_out_of_earth/waterbody.tif'))
 
-print(arr.shape, wbd_arr.shape)
+print(arr.shape)
 print("from {:,} m to {:,} m".format(arr.min(), arr.max()))
 
 # crop
 arr = arr[cropY1:cropY2, cropX1:cropX2]
 wbd_arr = wbd_arr[cropY1:cropY2, cropX1:cropX2]
 print("cropped", arr.shape, arr.min(), arr.max())
+
+Image.fromarray(arr).save(os.path.expanduser('~/color_out_of_earth/elevation-cropped.tif'))
+Image.fromarray(wbd_arr).save(os.path.expanduser('~/color_out_of_earth/waterbody-cropped.tif'))
 
 arr = arr.astype(np.single)
 print("astype", arr.shape, arr.min(), arr.max())
@@ -710,31 +746,7 @@ if args.output:
 print("saved images")
 
 if not args.previous:
-	# delete previous zips
-	prev_txt_path = os.path.expanduser('~/color_out_of_earth/previous.txt')
-	if os.path.exists(prev_txt_path):
-		in_txt_file = open(prev_txt_path, "r")
-		lines = in_txt_file.readlines()
-		prevLocCode, prevLat, prevLon = lines[0].strip(), int(lines[1].strip()), int(lines[2].strip())
-		if inSRTM:
-			zip_path = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(prevLocCode))
-		elif inASTER:
-			zip_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}.zip'.format(prevLocCode))
-		if os.path.exists(zip_path):
-			os.remove(zip_path)
-		wbd_zip_path = os.path.expanduser('~/color_out_of_earth/ASTWBDV001_{}.zip'.format(prevLocCode))
-		if os.path.exists(wbd_zip_path):
-			os.remove(wbd_zip_path)
-	# save zips
-	if inSRTM:
-		zip_path = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(locationCode))
-	elif inASTER:
-		zip_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}.zip'.format(locationCode))
-	with open(zip_path, 'wb') as zf:
-		zf.write(zip_data)
-	with open(os.path.expanduser('~/color_out_of_earth/ASTWBDV001_{}.zip'.format(locationCode)), 'wb') as wzf:
-		wzf.write(wbd_zip_data)
 	# save previous info
-	out_txt_file = open(prev_txt_path, "w")
-	out_txt_file.write("{}\n{}\n{}".format(locationCode, latitude, longitude))
-	out_txt_file.close()
+	previousInfo = {'latitude':latitude, 'longitude':longitude, 'rotation':rotation, 'cropWidth':cropWidth, 'cropHeight':cropHeight}
+	with open(os.path.expanduser('~/color_out_of_earth/previous.json'), 'w') as write_file:
+		json.dump(previousInfo, write_file, indent='')
