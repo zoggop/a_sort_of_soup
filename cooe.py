@@ -36,6 +36,7 @@ from perceptual_hues_lavg import perceptualHues
 
 CurrentGrade = None
 CurrentlyDownloadingFiles = []
+StatusPrintLock = False
 
 degreesPerTheta = 90 / (math.pi / 2)
 
@@ -110,12 +111,10 @@ def tileListCropStretchFromLatLonCenter(latitude, longitude, width, height):
 	codes = {}
 	for corner in [[latMin, lonMin], [latMax, lonMin], [latMin, lonMax], [latMax, lonMax]]:
 		codes[latLonToLocationCode(corner[0], corner[1])] = True
-	print(latMin, latMax, lonMin, lonMax)
 	cropX1 = int((lonMin - math.floor(lonMin)) * 3601)
 	cropX2 = cropX1 + cropWidth
 	cropY1 = int((math.ceil(latMax) - latMax) * 3601)
 	cropY2 = cropY1 + cropHeight
-	print(cropX1, cropX2, cropY1, cropY2)
 	metersPerPixel = xMeters / 3601
 	return [*codes], cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel
 
@@ -300,12 +299,16 @@ def getEOSDISlogin():
 	return username, password
 
 def printDownloadStatus(overwrite=True):
+	global StatusPrintLock
+	if StatusPrintLock:
+		return
+	StatusPrintLock = True
 	if overwrite == True:
 		for d in CurrentlyDownloadingFiles:
 			sys.stdout.write("\033[F")
 	for d in CurrentlyDownloadingFiles:
 		sys.stdout.write("{} {} {}\n".format(d.get('code'), d.get('layer'), d.get('status') or ''))
-	# sys.stdout.flush()
+	StatusPrintLock = False
 
 def downloadResponseWithStatus(response, download):
 	totalkB = None
@@ -381,8 +384,6 @@ def downloadWithAuth(url, un, pw, download):
 				response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'}, stream=True)
 			except:
 				response2 = None
-			download['status'] = "response {}".format(attempt)
-			printDownloadStatus()
 			attempt += 1
 		return downloadResponseWithStatus(response2, download)
 
@@ -405,8 +406,9 @@ def downloadOneFile(file):
 def downloadFiles(files):
 	global CurrentlyDownloadingFiles
 	CurrentlyDownloadingFiles = files
+	print(" ")
 	printDownloadStatus(False)
-	with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+	with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
 		executor.map(downloadOneFile, files)
 
 def downloadTiles(codes, username, password):
@@ -506,12 +508,10 @@ if args.previous and os.path.exists(os.path.expanduser('~/color_out_of_earth/pre
 		args.rotation = previousInfo.get('rotation')
 		args.latitude = previousInfo.get('latitude')
 		args.longitude = previousInfo.get('longitude')
-		print(args)
 
 # pick a random location or use specified coordinates
 codes = []
 attempt = 0
-print("args latlon", args.latitude, args.longitude)
 while attempt < 50 and (len(codes) == 0 or not checkOutLocationCodes(codes)):
 	# rotate to get crop dimensions
 	rotation = random.randint(0, 3)
@@ -528,7 +528,6 @@ while attempt < 50 and (len(codes) == 0 or not checkOutLocationCodes(codes)):
 		latitude = float(args.latitude)
 	if args.longitude and (attempt == 0 or not args.latitude):
 		longitude = float(args.longitude)
-	print(latitude, longitude)
 	codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel = tileListCropStretchFromLatLonCenter(latitude, longitude, cropWidth, cropHeight)
 print(latitude, longitude)
 print("rotation:", rotation, cropWidth, cropHeight)
