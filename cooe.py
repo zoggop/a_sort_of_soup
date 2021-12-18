@@ -21,7 +21,7 @@ from io import BytesIO
 import random
 import sys
 import json
-from cv2 import resize, INTER_CUBIC
+from cv2 import resize, INTER_LINEAR
 # from skimage.restoration import denoise_nl_means, denoise_tv_chambolle
 import skimage.filters.rank as rank
 from skimage.morphology import disk, ball
@@ -593,7 +593,7 @@ wbd_arr = (slope == 0) & (wbd_arr > wbd_arr.min())
 wbd_arr = autocontrastedUint8(wbd_arr.astype(np.uint8))
 
 # stretch and rotate elevation data
-arr = resize(arr, dsize=(rotatedWidth, rotatedHeight), interpolation=INTER_CUBIC)
+arr = resize(arr, dsize=(rotatedWidth, rotatedHeight), interpolation=INTER_LINEAR)
 wbd_arr = resize(wbd_arr, dsize=(rotatedWidth, rotatedHeight))
 print("resized", arr.shape, arr.min(), arr.max())
 if rotation > 0:
@@ -714,8 +714,7 @@ if arr.max() - arr.min() > 100:
 	arr_eq = (0.5 * image_histogram_equalization(arr, 256)) + (0.5 * autocontrast(arr, 255))
 else:
 	arr_eq = arr
-print("half equalized", arr_eq.min(), arr_eq.max())
-el_img = Image.fromarray(arr_eq.astype(np.uint8))
+el_img = Image.fromarray(autocontrastedUint8(arr_eq))
 print(el_img.mode, len(el_img.getcolors()))
 print(el_img.size)
 
