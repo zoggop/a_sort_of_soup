@@ -38,12 +38,83 @@ CurrentGrade = None
 
 degreesPerTheta = 90 / (math.pi / 2)
 
+def parseLocationCode(locationCode):
+	NS = locationCode[0]
+	latitude = int(locationCode[1:3])
+	EW = locationCode[3]
+	longitude = int(locationCode[4:7])
+	if NS == 'S':
+		latitude = 0 - latitude
+	if EW == 'W':
+		longitude = 0 - longitude
+	return latitude, longitude
+
+def latLonToLocationCode(latitude, longitude):
+	latitude, longitude = math.floor(latitude), math.floor(longitude)
+	NS = 'N'
+	if latitude < 0:
+		NS = 'S'
+	EW = 'E'
+	if longitude < 0:
+		EW = 'W'
+	return '{}{:02d}{}{:03d}'.format(NS, abs(latitude), EW, abs(longitude))
+
 def uniformlyRandomLatLon():
 	# https://www.cs.cmu.edu/~mws/rpos.html
 	z = random.randint(-10000000, 10000000) / 10000000
 	lat = math.asin(z) * degreesPerTheta
 	lon = random.randint(-18000000, 18000000) / 100000
 	return lat, lon
+
+def measureLatLonInMeters(lat1, lon1, lat2, lon2):
+	R = 6378.137 # Radius of earth in KM
+	dLat = lat2 * math.pi / 180 - lat1 * math.pi / 180
+	dLon = lon2 * math.pi / 180 - lon1 * math.pi / 180
+	a = math.sin(dLat/2) * math.sin(dLat/2) + math.cos(lat1 * math.pi / 180) * math.cos(lat2 * math.pi / 180) * math.sin(dLon/2) * math.sin(dLon/2)
+	c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+	d = R * c
+	return d * 1000
+
+def xyMultAtLatLon(latitude, longitude, size=1):
+	halfSize = size / 2
+	xMeters = measureLatLonInMeters(latitude, longitude - halfSize, latitude, longitude + halfSize)
+	yMeters = measureLatLonInMeters(latitude - halfSize, longitude, latitude + halfSize, longitude)
+	yMult = yMeters / xMeters
+	xMult = 1
+	if yMult > 2:
+		xMult = 0.5
+		yMult = yMult / 2
+	return xMult, yMult, xMeters, yMeters
+
+def tileListCropStretchFromLatLonCenter(latitude, longitude, width, height):
+	xMult, yMult, xMeters, yMeters = xyMultAtLatLon(latitude, longitude, 1)
+	xPixelsPerLon = 3601 * xMult
+	yPixelsPerLat = 3601 * yMult
+	lonWidth = width / xPixelsPerLon
+	latHeight = height / yPixelsPerLat
+	lonMin = longitude - (lonWidth / 2)
+	if lonMin < -180:
+		lonMin += 360
+	lonMax = longitude + (lonWidth / 2)
+	if lonMax > 180:
+		lonMax -= 360
+	latMin = latitude - (latHeight / 2)
+	latMax = latitude + (latHeight / 2)
+	if latMin < 0:
+		latMax -= latMin
+		latMin = 0
+	if latMax > 90:
+		latMin -= latMax - 90
+		latMax = 90
+	codes = {}
+	for corner in [[latMin, lonMin], [latMax, lonMin], [latMin, lonMax], [latMax, lonMax]]:
+		codes[latLonToLocationCode(corner[0], corner[1])] = True
+	cropX1 = int((lonMin - math.floor(lonMin)) * xPixelsPerLon)
+	cropX2 = cropX1 + int(width / xMult)
+	cropY1 = int((latMin - math.floor(latMin)) * yPixelsPerLat)
+	cropY2 = cropY1 + int(height / yMult)
+	metersPerPixel = xMeters / xPixelsPerLon
+	return [*codes], cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel
 
 def asInt(intStr):
 	try:
@@ -206,15 +277,6 @@ def skewMedianToCenter(arr):
 	mult = (med / center)
 	return arr * (abs(arr / med) * mult)
 
-def measureLatLonInMeters(lat1, lon1, lat2, lon2):
-	R = 6378.137 # Radius of earth in KM
-	dLat = lat2 * math.pi / 180 - lat1 * math.pi / 180
-	dLon = lon2 * math.pi / 180 - lon1 * math.pi / 180
-	a = math.sin(dLat/2) * math.sin(dLat/2) + math.cos(lat1 * math.pi / 180) * math.cos(lat2 * math.pi / 180) * math.sin(dLon/2) * math.sin(dLon/2)
-	c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-	d = R * c
-	return d * 1000
-
 def getEOSDISlogin():
 	comb = catacomb.Catacomb(os.path.expanduser('~/color_out_of_earth'), 'uR7UtrczNUM0FnzR8X')
 	username = comb.decrypt('eosdis_username')
@@ -252,27 +314,6 @@ def downloadResponseWithStatus(response):
 		content += chunk
 	print(" ")
 	return content
-
-def parseLocationCode(locationCode):
-	NS = locationCode[0]
-	latitude = int(locationCode[1:3])
-	EW = locationCode[3]
-	longitude = int(locationCode[4:7])
-	if NS == 'S':
-		latitude = 0 - latitude
-	if EW == 'W':
-		longitude = 0 - longitude
-	return latitude, longitude
-
-def latLonToLocationCode(latitude, longitude):
-	latitude, longitude = math.floor(latitude), math.floor(longitude)
-	NS = 'N'
-	if latitude < 0:
-		NS = 'S'
-	EW = 'E'
-	if longitude < 0:
-		EW = 'W'
-	return '{}{:02d}{}{:03d}'.format(NS, abs(latitude), EW, abs(longitude))
 
 def listFD(url, ext=''):
     response = requests.get(url)
@@ -332,19 +373,96 @@ def downloadWithAuth(url, un, pw):
 		return downloadResponseWithStatus(response2)
 	elif response.url:
 		print("redirected")
-		response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'}, stream=True)
-		if response2.status_code == 200:
-			return downloadResponseWithStatus(response2)
+		attempt = 1
+		response2 = None
+		while response2 is None or response2.status_code != 200:
+			response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'}, stream=True)
+			print(attempt, response2.status_code)
+			attempt += 1
+		return downloadResponseWithStatus(response2)
+
+def extractFile(file):
+	if file.get('zipped'):
+		with ZipFile(BytesIO(file.get('content')), 'r') as zip:
+			with zip.open(file.get('zipped'), mode='r') as zippedFile:
+				ext = os.path.splitext(file.get('zipped'))[1].lower()
+				if ext == '.hgt':
+					raw = zippedFile.read()
+					siz = len(raw)
+					dim = int(math.sqrt(siz/2))
+					file['array'] = np.frombuffer(raw, np.dtype('>i2'), dim*dim).reshape((dim, dim))
+				elif ext == '.tif':
+					file['array'] = np.array(Image.open(BytesIO(zippedFile.read())))
 
 def downloadOneFile(file):
-	try:
-		file['content'] = downloadWithAuth(file.get('url'), file.get('username'), file.get('password'))
-	except: 
-		print("Couldn't download", file.get('url'))
+	file['content'] = downloadWithAuth(file.get('url'), file.get('username'), file.get('password'))
 
 def downloadFiles(files):
-	with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
+	with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
 		executor.map(downloadOneFile, files)
+
+def downloadTiles(codes, username, password):
+	downloads = []
+	for code in codes:
+		if SRTMlocationCodes.get(code):
+			url = 'http://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/{}.SRTMGL1.hgt.zip'.format(code)
+			zipped= '{}.hgt'.format(code)
+		elif ASTERlocationCodes.get(code):
+			url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_{}.zip'.format(code)
+			zipped = 'ASTGTMV003_{}_dem.tif'.format(code)
+		downloads.append({'url':url, 'code':code, 'layer':'elevation', 'zipped':zipped, 'username':username, 'password':password})
+		downloads.append({'url':'https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_{}.zip'.format(code), 'code':code, 'layer':'waterbody', 'zipped':'ASTWBDV001_{}_dem.tif'.format(code), 'username':username, 'password':password})
+	downloadFiles(downloads)
+	return downloads
+
+def extractTiles(downloads):
+	for d in downloads:
+		extractFile(d)
+
+def arrangeTiles(downloads):
+	# get bounds
+	latMin, latMax, lonMin, lonMax = None, None, None, None
+	layers = {}
+	for d in downloads:
+		lat, lon = parseLocationCode(d.get('code'))
+		layer = d.get('layer')
+		if layers.get(layer) is None:
+			layers[layer] = {'lats':{}}
+		if layers.get(layer).get('lats').get(lat) is None:
+			layers[layer]['lats'][lat] = {}
+		layers[layer]['lats'][lat][lon] = d.get('array')
+		if latMin is None or lat < latMin:
+			latMin = lat
+		if latMax is None or lat > latMax:
+			latMax = lat
+		if lonMin is None or lon < lonMin:
+			lonMin = lon
+		if lonMax is None or lon > lonMax:
+			lonMax = lon
+	outLayers = {}
+	for layer in layers.keys():
+		thisLayer = layers.get(layer)
+		rows = None
+		for lat in range(latMin, latMax+1):
+			row = None
+			for lon in range(lonMin, lonMax+1):
+				tileArr = thisLayer.get('lats').get(lat).get(lon)
+				if row is None:
+					row = tileArr
+				else:
+					row = np.concatenate((row, tileArr), axis=1)
+			if rows is None:
+				rows = row
+			else:
+				rows = np.concatenate((rows, row), axis=0)
+		outLayers[layer] = rows
+	return outLayers
+
+def checkOutLocationCodes(codes):
+	for code in codes:
+		if not SRTMlocationCodes.get(code) and not ASTERlocationCodes.get(code):
+			return False
+	return True
 
 def parseArguments():
 	parser = argparse.ArgumentParser()
@@ -363,64 +481,16 @@ args = parseArguments()
 SRTMlocationCodes = loadSRTMtileList()
 ASTERlocationCodes = loadASTERtileList()
 
-zip_data = None
-locationCode = None
+# get screen dimensions
+screenWidth, screenHeight = None, None
+for m in get_monitors():
+	if screenWidth == None or m.width > screenWidth:
+		screenWidth = m.width
+	if screenHeight == None or m.height > screenHeight:
+		screenHeight = m.height
+print("screen:", screenWidth, screenHeight)
 
-# read zip data from previous download
-if args.previous and os.path.exists(os.path.expanduser('~/color_out_of_earth/previous.txt')):
-	in_txt_file = open(os.path.expanduser('~/color_out_of_earth/previous.txt'), "r")
-	lines = in_txt_file.readlines()
-	locationCode, latitude, longitude = lines[0].strip(), int(lines[1].strip()), int(lines[2].strip())
-	inSRTM, inASTER = SRTMlocationCodes.get(locationCode), ASTERlocationCodes.get(locationCode)
-	print(locationCode)
-	if inSRTM:
-		print('SRTM')
-		zip_path = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(locationCode))
-	elif inASTER:
-		print('ASTER')
-		zip_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}.zip'.format(locationCode))
-	with open(zip_path, 'rb') as zf:
-		zip_data = zf.read()
-	with open(os.path.expanduser('~/color_out_of_earth/ASTWBDV001_{}.zip'.format(locationCode)), 'rb') as wzf:
-		wbd_zip_data = wzf.read()
-
-# download new zip data
-if locationCode is None:
-	username, password = getEOSDISlogin()
-	if args.latitude and args.longitude:
-		latitude, longitude = args.latitude, args.longitude
-		locationCode = latLonToLocationCode(latitude, longitude)
-		print(locationCode)
-	else:
-		locationCode, latitude, longitude = randomTileLocation(SRTMlocationCodes, ASTERlocationCodes)
-	inSRTM, inASTER = SRTMlocationCodes.get(locationCode), ASTERlocationCodes.get(locationCode)
-	if inSRTM:
-		url = 'http://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/{}.SRTMGL1.hgt.zip'.format(locationCode)
-	elif inASTER:
-		url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_{}.zip'.format(locationCode)
-	downloads = [{'url':url, 'username':username, 'password':password}]
-	downloads.append({'url':'https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_{}.zip'.format(locationCode), 'username':username, 'password':password})
-	downloadFiles(downloads)
-	zip_data = downloads[0].get('content')
-	wbd_zip_data = downloads[1].get('content')
-
-
-if zip_data is None:
-	print("no zip data")
-	exit()
-
-xMeters = measureLatLonInMeters(latitude + 0.5, longitude, latitude + 0.5, longitude + 1)
-yMeters = measureLatLonInMeters(latitude, longitude + 0.5, latitude + 1, longitude + 0.5)
-yMult = yMeters / xMeters
-xMult = 1
-if yMult > 2:
-	xMult = 0.5
-	yMult = yMult / 2
-print("y-axis multiplier:", yMult)
-print("x-axis multiplier:", xMult)
-
-screenWidth = 1920
-screenHeight = 1080
+# rotate to get crop dimensions
 rotation = random.randint(0, 3)
 if rotation == 1 or rotation == 3:
 	cropWidth = screenHeight
@@ -430,58 +500,28 @@ else:
 	cropHeight = screenHeight
 print("rotation:", rotation, cropWidth, cropHeight)
 
-# process downloaded zip data
-if inSRTM:
-	with ZipFile(BytesIO(zip_data), 'r') as zip:
-		with zip.open('{}.hgt'.format(locationCode), mode='r') as hgtFile:
-			raw = hgtFile.read()
-			siz = len(raw)
-			dim = int(math.sqrt(siz/2))
-			arr = np.frombuffer(raw, np.dtype('>i2'), dim*dim).reshape((dim, dim))
-elif inASTER:
-	with ZipFile(BytesIO(zip_data), 'r') as zip:
-		zip.extract('ASTGTMV003_{}_dem.tif'.format(locationCode), path=os.path.expanduser('~/color_out_of_earth'))
-	arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}_dem.tif'.format(locationCode))))
-with ZipFile(BytesIO(wbd_zip_data), 'r') as zip:
-		zip.extract('ASTWBDV001_{}_dem.tif'.format(locationCode), path=os.path.expanduser('~/color_out_of_earth'))
-wbd_arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/ASTWBDV001_{}_dem.tif'.format(locationCode))))
+# pick a random location
+codes = []
+while len(codes) == 0 or len(codes) < 2 or not checkOutLocationCodes(codes):
+	codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel = tileListCropStretchFromLatLonCenter(*uniformlyRandomLatLon(), cropWidth, cropHeight)
+print(codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel)
 
-print(arr.shape)
-metersPerPixel = xMeters / arr.shape[1]
-print("meters per pixel:", metersPerPixel)
-print("{:,.0f} m by {:,.0f} m".format(xMeters, yMeters))
+# download and arrange tiles into images
+username, password = getEOSDISlogin()
+tiles = downloadTiles(codes, username, password)
+extractTiles(tiles)
+layers = arrangeTiles(tiles)
+arr = layers.get('elevation')
+wbd_arr = layers.get('waterbody')
+Image.fromarray(arr).save(os.path.expanduser('~/color_out_of_earth/elevation.tif'))
+Image.fromarray(wbd_arr).save(os.path.expanduser('~/color_out_of_earth/waterbody.tif'))
+
+print(arr.shape, wbd_arr.shape)
 print("from {:,} m to {:,} m".format(arr.min(), arr.max()))
 
-# Image.fromarray((arr-arr.min()).astype(np.uint16)).save(os.path.expanduser('~/color_out_of_earth/original_elevation.png'))
-
-# calculate where a crop won't just be an image of flat water
-nonZeroYs, nonZeroXs = np.nonzero(arr)
-print(nonZeroXs[0], nonZeroXs[-1], nonZeroYs[0], nonZeroYs[-1])
-heightBecomeCrop = round(cropHeight / yMult)
-widthBecomeCrop = round(cropWidth / xMult)
-acceptableOceanHeight = int(heightBecomeCrop / 2)
-acceptableOceanWidth = int(widthBecomeCrop / 2)
-xMax = arr.shape[1] - widthBecomeCrop
-yMax = arr.shape[0] - heightBecomeCrop
-xMax = max(0, min(nonZeroXs[-1] - acceptableOceanWidth, xMax))
-yMax = max(0, min(nonZeroYs[-1] - acceptableOceanHeight, yMax))
-xMin = max(0, min(nonZeroXs[0] - acceptableOceanWidth, xMax))
-yMin = max(0, min(nonZeroYs[0] - acceptableOceanHeight, yMax))
-print(xMin, xMax, yMin, yMax)
-
-# get a random crop
-if xMax > xMin:
-	x = random.randint(xMin, xMax)
-else:
-	x = xMin
-if yMax > yMin:
-	y = random.randint(yMin, yMax)
-else:
-	y = yMin
-x2 = x + widthBecomeCrop
-y2 = y + heightBecomeCrop
-arr = arr[y:y2, x:x2]
-wbd_arr = wbd_arr[y:y2, x:x2]
+# crop
+arr = arr[cropY1:cropY2, cropX1:cropX2]
+wbd_arr = wbd_arr[cropY1:cropY2, cropX1:cropX2]
 print("cropped", arr.shape, arr.min(), arr.max())
 
 arr = arr.astype(np.single)
@@ -670,7 +710,7 @@ if args.output:
 print("saved images")
 
 if not args.previous:
-	# delete previous zips and tif
+	# delete previous zips
 	prev_txt_path = os.path.expanduser('~/color_out_of_earth/previous.txt')
 	if os.path.exists(prev_txt_path):
 		in_txt_file = open(prev_txt_path, "r")
@@ -680,9 +720,6 @@ if not args.previous:
 			zip_path = os.path.expanduser('~/color_out_of_earth/{}.SRTMGL1.hgt.zip'.format(prevLocCode))
 		elif inASTER:
 			zip_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}.zip'.format(prevLocCode))
-			tif_path = os.path.expanduser('~/color_out_of_earth/ASTGTMV003_{}_dem.tif'.format(prevLocCode))
-			if os.path.exists(tif_path):
-				os.remove(tif_path)
 		if os.path.exists(zip_path):
 			os.remove(zip_path)
 		wbd_zip_path = os.path.expanduser('~/color_out_of_earth/ASTWBDV001_{}.zip'.format(prevLocCode))
