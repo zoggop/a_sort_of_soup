@@ -408,7 +408,7 @@ def downloadFiles(files):
 	CurrentlyDownloadingFiles = files
 	print(" ")
 	printDownloadStatus(False)
-	with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+	with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
 		executor.map(downloadOneFile, files)
 
 def downloadTiles(codes, username, password):
