@@ -249,8 +249,8 @@ def findWater(arr):
 				water = thisLabel
 			else:
 				water = water | thisLabel
-	if not water is None:
-		Image.fromarray(water).save(os.path.expanduser('~/the_color_out_of_earth/water.tif'))
+	# if not water is None:
+		# Image.fromarray(water).save(os.path.expanduser('~/the_color_out_of_earth/found_water.tif'))
 	return water
 
 def autocontrast(arr, maxValue):
@@ -490,7 +490,7 @@ def parseArguments():
 	parser.add_argument('--previous', '-p', action='store_true', help='Use previously downloaded data. --dimensions, --coordinates, and --rotation will have no effect.')
 	parser.add_argument('--nowater', '-w', action='store_true', help='Do not download or draw bodies of water.')
 	parser.add_argument('--noshade', '-s', action='store_true', help='Do not hillshade the terrain. This leaves only gradient-mapped elevations and water bodies.')
-	parser.add_argument('--output', '-o', nargs='?', type=str, metavar='FILEPATH', help='Path to save output image.')
+	parser.add_argument('--output', '-o', nargs='?', type=str, metavar='FILEPATH', help='Path to save output image. If not specified, will save to ~/the_color_out_of_earth/output.png along with elevation_gradient.tif, hillshade.tif, and water.tif')
 	parser.add_argument('--coordinates', '-c', nargs=2, type=float, metavar=('LATITUDE', 'LONGITUDE'), help='Location of center of desired image in latitude longitude coordinates. If not specified, a random location will be chosen.')
 	parser.add_argument('--dimensions', '-d', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'), help='Width and height in pixels of output image. Larger images will require downloading more source tiles.')
 	parser.add_argument('--rotation', '-r', nargs='?', type=int, metavar='0-3', help='How many times 90 degrees to rotate. (0: North is up. 1: East is up. 2: South is up. 3: West is up.) If not specified, this will be chosen randomly.')
@@ -692,7 +692,7 @@ if args.chromas:
 		chromas[cIndex] = chroma
 		cIndex += 1	
 for cIndex in range(0, 3):
-	chromas[cIndex] = chromas[cIndex] or (random.randint(0,1) == 1 and random.randint(args.minchroma, args.maxchroma)) or args.maxchroma
+	chromas[cIndex] = chromas[cIndex] or (random.randint(0,1) == 1 and random.randint(0, args.maxchroma)) or args.maxchroma
 print('chromas:', chromas)
 
 # create gradient
@@ -734,7 +734,6 @@ waterInterpol = coloraide.Color('srgb', [0, 0, 0], 0).interpolate(waterColor)
 if not wbd_arr is None:
 	wbd_img = Image.fromarray(wbd_arr).filter(ImageFilter.GaussianBlur(radius=0.67))
 	color_wbd_img = colorizeWithInterpolation(wbd_img, waterInterpol, True)
-	color_wbd_img.save(os.path.expanduser('~/the_color_out_of_earth/wbd.tif'))
 
 if args.noshade:
 	blended_img = color_el_img.convert('RGBA')
@@ -753,19 +752,20 @@ else:
 	blended_img = Image.alpha_composite(blended_img, color_wbd_img).convert('RGB')
 
 # save images
-# Image.fromarray(autocontrastedUint16(arr)).save(os.path.expanduser('~/the_color_out_of_earth/el16_img.tif'))
 # el_img.save(os.path.expanduser('~/the_color_out_of_earth/el_img.tif'))
-if not args.noshade:
-	hs_img.save(os.path.expanduser('~/the_color_out_of_earth/hs_img.tif'))
-# color_hs_img.save(os.path.expanduser('~/the_color_out_of_earth/color_hs_img.tif'))
-color_el_img.save(os.path.expanduser('~/the_color_out_of_earth/color_el_img.tif'))
-blended_img.save(os.path.expanduser('~/the_color_out_of_earth/blended_img.png'))
 if args.output:
 	if os.path.exists(os.path.split(args.output)[0]):
 		if os.path.splitext(args.output)[1] == '':
 			blended_img.save(args.output, format='PNG')
 		else:
 			blended_img.save(args.output)
+else:
+	if not args.noshade:
+		hs_img.save(os.path.expanduser('~/the_color_out_of_earth/hillshade.tif'))
+	if not args.nowater:
+		color_wbd_img.save(os.path.expanduser('~/the_color_out_of_earth/water.tif'))
+	color_el_img.save(os.path.expanduser('~/the_color_out_of_earth/elevation_gradient.tif'))
+	blended_img.save(os.path.expanduser('~/the_color_out_of_earth/output.png'))
 
 print("saved images")
 
