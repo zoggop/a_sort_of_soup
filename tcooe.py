@@ -234,12 +234,12 @@ def hillshade(array, azimuth, angle_altitude, slope=None, aspect=None):
 def findWater(arr):
 	slope = slopeOfArray(arr)
 	slopeFiltered = rank.maximum(autocontrastedUint8(slope), disk(4))
-	# Image.fromarray(autocontrastedUint8(slopeFiltered)).save(os.path.expanduser('~/color_out_of_earth/slope-filtered.tif'))
+	# Image.fromarray(autocontrastedUint8(slopeFiltered)).save(os.path.expanduser('~/the_color_out_of_earth/slope-filtered.tif'))
 	flat = slopeFiltered == 0
-	# Image.fromarray(flat).save(os.path.expanduser('~/color_out_of_earth/flat.tif'))
+	# Image.fromarray(flat).save(os.path.expanduser('~/the_color_out_of_earth/flat.tif'))
 	labels, num_features = label(flat)
 	# print(num_features, "flat areas")
-	# Image.fromarray(labels).save(os.path.expanduser('~/color_out_of_earth/labels.tif'))
+	# Image.fromarray(labels).save(os.path.expanduser('~/the_color_out_of_earth/labels.tif'))
 	water = None
 	for label in range(1, num_features+1):
 		count = np.count_nonzero(labels==label)
@@ -250,7 +250,7 @@ def findWater(arr):
 			else:
 				water = water | thisLabel
 	if not water is None:
-		Image.fromarray(water).save(os.path.expanduser('~/color_out_of_earth/water.tif'))
+		Image.fromarray(water).save(os.path.expanduser('~/the_color_out_of_earth/water.tif'))
 	return water
 
 def autocontrast(arr, maxValue):
@@ -280,7 +280,7 @@ def skewMedianToCenter(arr):
 	return arr * (abs(arr / med) * mult)
 
 def getEOSDISlogin():
-	comb = catacomb.Catacomb(os.path.expanduser('~/color_out_of_earth'), 'uR7UtrczNUM0FnzR8X')
+	comb = catacomb.Catacomb(os.path.expanduser('~/the_color_out_of_earth'), 'uR7UtrczNUM0FnzR8X')
 	username = comb.decrypt('eosdis_username')
 	if username == None:
 		username = input('        EOSDIS username: ')
@@ -337,7 +337,7 @@ def listFD(url, ext=''):
 
 def loadSRTMtileList():
 	# get source of tile list if one hasn't been yet generated
-	if not os.path.exists(os.path.expanduser('~/color_out_of_earth/srtm_tile_list.json')):
+	if not os.path.exists(os.path.expanduser('~/the_color_out_of_earth/srtm_tile_list.json')):
 		print('downloading SRTM tile list from https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json')
 		response = requests.get('https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json')
 		if response.status_code == 200:
@@ -346,27 +346,27 @@ def loadSRTMtileList():
 			for f in collection.get('features'):
 				locCode = f.get('properties').get('dataFile').split('.')[0]
 				locCodes[locCode] = True
-			with open(os.path.expanduser('~/color_out_of_earth/srtm_tile_list.json'), 'w') as write_file:
+			with open(os.path.expanduser('~/the_color_out_of_earth/srtm_tile_list.json'), 'w') as write_file:
 				json.dump(locCodes, write_file, indent='')
 		else:
 			print('could not download', response.url)
 	# load tile list
-	with open(os.path.expanduser('~/color_out_of_earth/srtm_tile_list.json'), "r") as read_file:
+	with open(os.path.expanduser('~/the_color_out_of_earth/srtm_tile_list.json'), "r") as read_file:
 		locCodes = json.load(read_file)
 	return locCodes
 
 def loadASTERtileList():
 	# get source of tile list if one hasn't been yet generated
-	if not os.path.exists(os.path.expanduser('~/color_out_of_earth/aster_tile_list.json')):
+	if not os.path.exists(os.path.expanduser('~/the_color_out_of_earth/aster_tile_list.json')):
 		print('downloading ASTER tile list from https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/')
 		locCodes = {}
 		for filename in listFD('https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/', 'zip'):
 			locCode = filename[-11:-4]
 			locCodes[locCode] = True
-		with open(os.path.expanduser('~/color_out_of_earth/aster_tile_list.json'), 'w') as write_file:
+		with open(os.path.expanduser('~/the_color_out_of_earth/aster_tile_list.json'), 'w') as write_file:
 				json.dump(locCodes, write_file, indent='')
 	# load tile list
-	with open(os.path.expanduser('~/color_out_of_earth/aster_tile_list.json'), "r") as read_file:
+	with open(os.path.expanduser('~/the_color_out_of_earth/aster_tile_list.json'), "r") as read_file:
 		locCodes = json.load(read_file)
 	return locCodes
 
@@ -515,9 +515,9 @@ for m in get_monitors():
 		screenHeight = m.height
 print("screen:", screenWidth, screenHeight)
 
-if args.previous and os.path.exists(os.path.expanduser('~/color_out_of_earth/previous.json')):
+if args.previous and os.path.exists(os.path.expanduser('~/the_color_out_of_earth/previous.json')):
 	# get previous info if asked for and exists
-	with open(os.path.expanduser('~/color_out_of_earth/previous.json'), "r") as read_file:
+	with open(os.path.expanduser('~/the_color_out_of_earth/previous.json'), "r") as read_file:
 		previousInfo = json.load(read_file)
 		args.rotation = int(previousInfo.get('rotation'))
 		args.coordinates = [float(previousInfo.get('latitude')), float(previousInfo.get('longitude'))]
@@ -555,9 +555,9 @@ wbd_arr = None
 
 if args.previous:
 	# use previously downloaded cropped images
-	arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/elevation-cropped.tif')))
-	if not args.nowater and os.path.exists(os.path.expanduser('~/color_out_of_earth/waterbody-cropped.tif')):
-		wbd_arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/waterbody-cropped.tif')))
+	arr = np.array(Image.open(os.path.expanduser('~/the_color_out_of_earth/elevation-cropped.tif')))
+	if not args.nowater and os.path.exists(os.path.expanduser('~/the_color_out_of_earth/waterbody-cropped.tif')):
+		wbd_arr = np.array(Image.open(os.path.expanduser('~/the_color_out_of_earth/waterbody-cropped.tif')))
 else:
 	# download and arrange tiles into images
 	username, password = getEOSDISlogin()
@@ -566,23 +566,23 @@ else:
 	layers = arrangeTiles(tiles)
 	arr = layers.get('elevation')
 	
-	# Image.fromarray(arr).save(os.path.expanduser('~/color_out_of_earth/elevation.tif'))
-	# Image.fromarray(wbd_arr).save(os.path.expanduser('~/color_out_of_earth/waterbody.tif'))
+	# Image.fromarray(arr).save(os.path.expanduser('~/the_color_out_of_earth/elevation.tif'))
+	# Image.fromarray(wbd_arr).save(os.path.expanduser('~/the_color_out_of_earth/waterbody.tif'))
 	print(arr.shape)
 	print("from {:,} m to {:,} m".format(arr.min(), arr.max()))
 	# crop
 	arr = arr[cropY1:cropY2, cropX1:cropX2]
 	print("cropped", arr.shape, arr.min(), arr.max())
-	Image.fromarray(arr).save(os.path.expanduser('~/color_out_of_earth/elevation-cropped.tif'))
+	Image.fromarray(arr).save(os.path.expanduser('~/the_color_out_of_earth/elevation-cropped.tif'))
 	if not args.nowater:
 		wbd_arr = layers.get('waterbody')
 		wbd_arr = wbd_arr[cropY1:cropY2, cropX1:cropX2]
-		Image.fromarray(wbd_arr).save(os.path.expanduser('~/color_out_of_earth/waterbody-cropped.tif'))
+		Image.fromarray(wbd_arr).save(os.path.expanduser('~/the_color_out_of_earth/waterbody-cropped.tif'))
 
 arr = arr.astype(np.single)
 print("astype", arr.shape, arr.min(), arr.max())
 
-# Image.fromarray(autocontrastedUint8(arr)).save(os.path.expanduser('~/color_out_of_earth/el-cropped.tif'))
+# Image.fromarray(autocontrastedUint8(arr)).save(os.path.expanduser('~/the_color_out_of_earth/el-cropped.tif'))
 
 # clip negative bits if this crop contains sea level
 if 0 in arr and arr.min() < 0:
@@ -592,7 +592,7 @@ if 0 in arr and arr.min() < 0:
 
 # restrict waterbody image to only those areas with 0 slope, so it doesn't cut off the hillshade
 slope = slopeOfArray(arr)
-# Image.fromarray(autocontrastedUint8(slope)).save(os.path.expanduser('~/color_out_of_earth/slope.tif'))
+# Image.fromarray(autocontrastedUint8(slope)).save(os.path.expanduser('~/the_color_out_of_earth/slope.tif'))
 if not wbd_arr is None:
 	wbd_arr = (slope == 0) & (wbd_arr > wbd_arr.min())
 	wbd_arr = autocontrastedUint8(wbd_arr.astype(np.uint8))
@@ -623,7 +623,7 @@ if not args.noshade:
 	hsSum = None
 	for shade in shades:
 		hs = hillshade(arrForShade, shade[0], shade[1], slopeForShade, aspectForShade) * shade[2]
-		# Image.fromarray(hs.astype(np.uint8)).save(os.path.expanduser('~/color_out_of_earth/hs-{}-{}-{}.tif'.format(*shade)))
+		# Image.fromarray(hs.astype(np.uint8)).save(os.path.expanduser('~/the_color_out_of_earth/hs-{}-{}-{}.tif'.format(*shade)))
 		if hsSum is None:
 			hsSum = hs
 		else:
@@ -735,7 +735,7 @@ waterInterpol = coloraide.Color('srgb', [0, 0, 0], 0).interpolate(waterColor)
 if not wbd_arr is None:
 	wbd_img = Image.fromarray(wbd_arr).filter(ImageFilter.GaussianBlur(radius=0.67))
 	color_wbd_img = colorizeWithInterpolation(wbd_img, waterInterpol, True)
-	color_wbd_img.save(os.path.expanduser('~/color_out_of_earth/wbd.tif'))
+	color_wbd_img.save(os.path.expanduser('~/the_color_out_of_earth/wbd.tif'))
 
 if args.noshade:
 	blended_img = color_el_img.convert('RGBA')
@@ -754,13 +754,13 @@ else:
 	blended_img = Image.alpha_composite(blended_img, color_wbd_img).convert('RGB')
 
 # save images
-# Image.fromarray(autocontrastedUint16(arr)).save(os.path.expanduser('~/color_out_of_earth/el16_img.tif'))
-# el_img.save(os.path.expanduser('~/color_out_of_earth/el_img.tif'))
+# Image.fromarray(autocontrastedUint16(arr)).save(os.path.expanduser('~/the_color_out_of_earth/el16_img.tif'))
+# el_img.save(os.path.expanduser('~/the_color_out_of_earth/el_img.tif'))
 if not args.noshade:
-	hs_img.save(os.path.expanduser('~/color_out_of_earth/hs_img.tif'))
-# color_hs_img.save(os.path.expanduser('~/color_out_of_earth/color_hs_img.tif'))
-color_el_img.save(os.path.expanduser('~/color_out_of_earth/color_el_img.tif'))
-blended_img.save(os.path.expanduser('~/color_out_of_earth/blended_img.png'))
+	hs_img.save(os.path.expanduser('~/the_color_out_of_earth/hs_img.tif'))
+# color_hs_img.save(os.path.expanduser('~/the_color_out_of_earth/color_hs_img.tif'))
+color_el_img.save(os.path.expanduser('~/the_color_out_of_earth/color_el_img.tif'))
+blended_img.save(os.path.expanduser('~/the_color_out_of_earth/blended_img.png'))
 if args.output:
 	if os.path.exists(os.path.split(args.output)[0]):
 		if os.path.splitext(args.output)[1] == '':
@@ -773,5 +773,5 @@ print("saved images")
 if not args.previous:
 	# save previous info
 	previousInfo = {'latitude':latitude, 'longitude':longitude, 'rotation':rotation, 'width':targetWidth, 'height':targetHeight}
-	with open(os.path.expanduser('~/color_out_of_earth/previous.json'), 'w') as write_file:
+	with open(os.path.expanduser('~/the_color_out_of_earth/previous.json'), 'w') as write_file:
 		json.dump(previousInfo, write_file, indent='')
