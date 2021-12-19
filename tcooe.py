@@ -494,7 +494,6 @@ def parseArguments():
 	parser.add_argument('--coordinates', '-c', nargs=2, type=float, metavar=('LATITUDE', 'LONGITUDE'), help='Location of center of desired image in latitude longitude coordinates. If not specified, a random location will be chosen.')
 	parser.add_argument('--dimensions', '-d', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'), help='Width and height in pixels of output image. Larger images will require downloading more source tiles.')
 	parser.add_argument('--rotation', '-r', nargs='?', type=int, metavar='0-3', help='How many times 90 degrees to rotate. (0: North is up. 1: East is up. 2: South is up. 3: West is up.) If not specified, this will be chosen randomly.')
-	parser.add_argument('--minchroma', nargs='?', type=float, default=0, metavar='0-134', help='Minimum chroma of image.')
 	parser.add_argument('--maxchroma', nargs='?', type=float, default=134, metavar='0-134', help='Maximum chroma of image.')
 	parser.add_argument('--lightnesses', nargs='+', type=int, metavar='0-100', help='Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
 	parser.add_argument('--chromas', nargs='+', type=int, metavar='0-134', help='Up to three chromas, in order of elevation. The remaining chromas will be chosen randomly.')
@@ -693,7 +692,7 @@ if args.chromas:
 		chromas[cIndex] = chroma
 		cIndex += 1	
 for cIndex in range(0, 3):
-	chromas[cIndex] = chromas[cIndex] or (random.randint(0,1) == 1 and random.randint(0, 134)) or args.maxchroma
+	chromas[cIndex] = chromas[cIndex] or (random.randint(0,1) == 1 and random.randint(args.minchroma, args.maxchroma)) or args.maxchroma
 print('chromas:', chromas)
 
 # create gradient
@@ -730,7 +729,7 @@ print(el_img.size)
 color_el_img = colorizeWithInterpolation(el_img, i)
 
 # colorize water bodies
-waterColor = highestChromaColor(darkMidLight[0], random.choice([bh,ch]))
+waterColor = highestChromaColor(darkMidLight[0], random.choice([bh,ch]), args.maxchroma)
 waterInterpol = coloraide.Color('srgb', [0, 0, 0], 0).interpolate(waterColor)
 if not wbd_arr is None:
 	wbd_img = Image.fromarray(wbd_arr).filter(ImageFilter.GaussianBlur(radius=0.67))
