@@ -233,7 +233,6 @@ def hillshade(array, azimuth, angle_altitude, slope=None, aspect=None):
 
 def findWater(arr):
 	slope = slopeOfArray(arr)
-	# Image.fromarray(autocontrastedUint8(slope)).save(os.path.expanduser('~/color_out_of_earth/slope.tif'))
 	slopeFiltered = rank.maximum(autocontrastedUint8(slope), disk(4))
 	# Image.fromarray(autocontrastedUint8(slopeFiltered)).save(os.path.expanduser('~/color_out_of_earth/slope-filtered.tif'))
 	flat = slopeFiltered == 0
@@ -422,7 +421,8 @@ def downloadTiles(codes, username, password):
 			url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_{}.zip'.format(code)
 			zipped = 'ASTGTMV003_{}_dem.tif'.format(code)
 		downloads.append({'url':url, 'code':code, 'layer':'elevation', 'zipped':zipped, 'username':username, 'password':password})
-		downloads.append({'url':'https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_{}.zip'.format(code), 'code':code, 'layer':'waterbody', 'zipped':'ASTWBDV001_{}_dem.tif'.format(code), 'username':username, 'password':password})
+		if not args.nowater:
+			downloads.append({'url':'https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_{}.zip'.format(code), 'code':code, 'layer':'waterbody', 'zipped':'ASTWBDV001_{}_dem.tif'.format(code), 'username':username, 'password':password})
 	downloadFiles(downloads)
 	return downloads
 
@@ -486,18 +486,19 @@ def checkOutLocationCodes(codes):
 	return True
 
 def parseArguments():
-	parser = argparse.ArgumentParser()
-	parser.add_argument('--previous', '-p', action='store_true', help='Use previously downloaded tile.')
-	parser.add_argument('-output', '-o', nargs='?', type=str, help='Path to save output image.')
-	parser.add_argument('-latitude', '-lat', nargs='?', type=float, help='Integer latitude of desired tile.')
-	parser.add_argument('-longitude', '-lon', nargs='?', type=float, help='Integer longitude of desired tile.')
-	parser.add_argument('-lightnesses', '-ls', nargs='+', type=int, help='0-100. Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
-	parser.add_argument('-chromas', '-cs', nargs='+', type=int, help='0-134. Up to three chromas, in order of elevation. The remaining chromas will be chosen randomly.')
-	parser.add_argument('-hues', '-hs', nargs='+', type=int, help='0-359. Up to three hues, in order of elevation. The remaining hues will be chosen randomly.')
-	parser.add_argument('-maxchroma', nargs='?', type=int, default=134, help='0-134. Maximum chroma of image.')
-	parser.add_argument('-rotation', '-rot', '-r', nargs='?', type=int, help='0-3. How many times 90 degrees to rotate north.')
-	parser.add_argument('-width', nargs='?', type=int, help='Output image width in pixels.')
-	parser.add_argument('-height', nargs='?', type=int, help='Output image height in pixels.')
+	parser = argparse.ArgumentParser(description='Create a colorful image of terrain of a random location.')
+	parser.add_argument('--previous', '-p', action='store_true', help='Use previously downloaded data. --dimensions, --coordinates, and --rotation will have no effect.')
+	parser.add_argument('--nowater', '-w', action='store_true', help='Do not download or draw bodies of water.')
+	parser.add_argument('--noshade', '-s', action='store_true', help='Do not hillshade the terrain. This leaves only gradient-mapped elevations and water bodies.')
+	parser.add_argument('--output', '-o', nargs='?', type=str, metavar='FILEPATH', help='Path to save output image.')
+	parser.add_argument('--coordinates', '-c', nargs=2, type=float, metavar=('LATITUDE', 'LONGITUDE'), help='Location of center of desired image in latitude longitude coordinates. If not specified, a random location will be chosen.')
+	parser.add_argument('--dimensions', '-d', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'), help='Width and height in pixels of output image. Larger images will require downloading more source tiles.')
+	parser.add_argument('--rotation', '-r', nargs='?', type=int, metavar='0-3', help='How many times 90 degrees to rotate. (0: North is up. 1: East is up. 2: South is up. 3: West is up.) If not specified, this will be chosen randomly.')
+	parser.add_argument('--minchroma', nargs='?', type=float, default=0, metavar='0-134', help='Minimum chroma of image.')
+	parser.add_argument('--maxchroma', nargs='?', type=float, default=134, metavar='0-134', help='Maximum chroma of image.')
+	parser.add_argument('--lightnesses', nargs='+', type=int, metavar='0-100', help='Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
+	parser.add_argument('--chromas', nargs='+', type=int, metavar='0-134', help='Up to three chromas, in order of elevation. The remaining chromas will be chosen randomly.')
+	parser.add_argument('--hues', nargs='+', type=int, metavar='0-359', help='Up to three hues, in order of elevation. The remaining hues will be chosen randomly.')
 	return parser.parse_args()
 
 args = parseArguments()
@@ -518,14 +519,14 @@ if args.previous and os.path.exists(os.path.expanduser('~/color_out_of_earth/pre
 	# get previous info if asked for and exists
 	with open(os.path.expanduser('~/color_out_of_earth/previous.json'), "r") as read_file:
 		previousInfo = json.load(read_file)
-		args.rotation = previousInfo.get('rotation')
-		args.latitude = previousInfo.get('latitude')
-		args.longitude = previousInfo.get('longitude')
-		args.width = previousInfo.get('width')
-		args.height = previousInfo.get('height')
+		args.rotation = int(previousInfo.get('rotation'))
+		args.coordinates = [float(previousInfo.get('latitude')), float(previousInfo.get('longitude'))]
+		args.dimensions = [int(previousInfo.get('width')), int(previousInfo.get('height'))]
 
-targetWidth = args.width or screenWidth
-targetHeight = args.height or screenHeight
+if args.dimensions:
+	targetWidth, targetHeight = args.dimensions[0], args.dimensions[1]
+else:
+	targetWidth, targetHeight = screenWidth, screenHeight
 print("output dimensions:", targetWidth, targetHeight)
 
 # pick a random location or use specified coordinates
@@ -533,29 +534,30 @@ codes = []
 attempt = 0
 while attempt < 50 and (len(codes) == 0 or not checkOutLocationCodes(codes)):
 	# rotate to get pre-rotated target dimensions
-	rotation = random.randint(0, 3)
 	if not args.rotation is None:
 		rotation = args.rotation
-	if rotation == 1 or rotation == 3:
-		rotatedWidth = targetHeight
-		rotatedHeight = targetWidth
 	else:
-		rotatedWidth = targetWidth
-		rotatedHeight = targetHeight
-	latitude, longitude = uniformlyRandomLatLon()
-	if args.latitude and (attempt == 0 or not args.longitude):
-		latitude = float(args.latitude)
-	if args.longitude and (attempt == 0 or not args.latitude):
-		longitude = float(args.longitude)
+		rotation = random.randint(0, 3)
+	if rotation == 1 or rotation == 3:
+		rotatedWidth, rotatedHeight = targetHeight, targetWidth
+	else:
+		rotatedWidth, rotatedHeight = targetWidth, targetHeight
+	if args.coordinates and attempt == 0:
+		latitude, longitude = args.coordinates[0], args.coordinates[1]
+	else:
+		latitude, longitude = uniformlyRandomLatLon()
 	codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel = tileListCropStretchFromLatLonCenter(latitude, longitude, rotatedWidth, rotatedHeight)
 print(latitude, longitude)
 print("rotation:", rotation, rotatedWidth, rotatedHeight)
 print(codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel)
 
+wbd_arr = None
+
 if args.previous:
 	# use previously downloaded cropped images
 	arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/elevation-cropped.tif')))
-	wbd_arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/waterbody-cropped.tif')))
+	if not args.nowater and os.path.exists(os.path.expanduser('~/color_out_of_earth/waterbody-cropped.tif')):
+		wbd_arr = np.array(Image.open(os.path.expanduser('~/color_out_of_earth/waterbody-cropped.tif')))
 else:
 	# download and arrange tiles into images
 	username, password = getEOSDISlogin()
@@ -563,17 +565,19 @@ else:
 	extractTiles(tiles)
 	layers = arrangeTiles(tiles)
 	arr = layers.get('elevation')
-	wbd_arr = layers.get('waterbody')
+	
 	# Image.fromarray(arr).save(os.path.expanduser('~/color_out_of_earth/elevation.tif'))
 	# Image.fromarray(wbd_arr).save(os.path.expanduser('~/color_out_of_earth/waterbody.tif'))
 	print(arr.shape)
 	print("from {:,} m to {:,} m".format(arr.min(), arr.max()))
 	# crop
 	arr = arr[cropY1:cropY2, cropX1:cropX2]
-	wbd_arr = wbd_arr[cropY1:cropY2, cropX1:cropX2]
 	print("cropped", arr.shape, arr.min(), arr.max())
 	Image.fromarray(arr).save(os.path.expanduser('~/color_out_of_earth/elevation-cropped.tif'))
-	Image.fromarray(wbd_arr).save(os.path.expanduser('~/color_out_of_earth/waterbody-cropped.tif'))
+	if not args.nowater:
+		wbd_arr = layers.get('waterbody')
+		wbd_arr = wbd_arr[cropY1:cropY2, cropX1:cropX2]
+		Image.fromarray(wbd_arr).save(os.path.expanduser('~/color_out_of_earth/waterbody-cropped.tif'))
 
 arr = arr.astype(np.single)
 print("astype", arr.shape, arr.min(), arr.max())
@@ -588,51 +592,55 @@ if 0 in arr and arr.min() < 0:
 
 # restrict waterbody image to only those areas with 0 slope, so it doesn't cut off the hillshade
 slope = slopeOfArray(arr)
-Image.fromarray(autocontrastedUint8(slope)).save(os.path.expanduser('~/color_out_of_earth/slope.tif'))
-wbd_arr = (slope == 0) & (wbd_arr > wbd_arr.min())
-wbd_arr = autocontrastedUint8(wbd_arr.astype(np.uint8))
+# Image.fromarray(autocontrastedUint8(slope)).save(os.path.expanduser('~/color_out_of_earth/slope.tif'))
+if not wbd_arr is None:
+	wbd_arr = (slope == 0) & (wbd_arr > wbd_arr.min())
+	wbd_arr = autocontrastedUint8(wbd_arr.astype(np.uint8))
 
 # stretch and rotate elevation data
 arr = resize(arr, dsize=(rotatedWidth, rotatedHeight), interpolation=INTER_LINEAR)
-wbd_arr = resize(wbd_arr, dsize=(rotatedWidth, rotatedHeight))
+if not wbd_arr is None:
+	wbd_arr = resize(wbd_arr, dsize=(rotatedWidth, rotatedHeight), interpolation=INTER_LINEAR)
 print("resized", arr.shape, arr.min(), arr.max())
 if rotation > 0:
 	arr = np.rot90(arr, k=rotation)
-	wbd_arr = np.rot90(wbd_arr, k=rotation)
+	if not wbd_arr is None:
+		wbd_arr = np.rot90(wbd_arr, k=rotation)
 print("rotated", arr.shape, arr.min(), arr.max())
 
 # process elevation map for hillshading
 arrForShade = arr / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
 print("for shade", arrForShade.min(), arrForShade.max())
 
-# create hillshade
-shades = [
-	[350, 70, 0.9],
-	[15, 60, 0.7],
-	[270, 55, 1]
-]
-slopeForShade, aspectForShade = hillshadePreparations(arrForShade)
-hsSum = None
-for shade in shades:
-	hs = hillshade(arrForShade, shade[0], shade[1], slopeForShade, aspectForShade) * shade[2]
-	# Image.fromarray(hs.astype(np.uint8)).save(os.path.expanduser('~/color_out_of_earth/hs-{}-{}-{}.tif'.format(*shade)))
-	if hsSum is None:
-		hsSum = hs
-	else:
-		hsSum += hs
-hs = (0.9 * autocontrast(hsSum, 255)) + (0.1 * image_histogram_equalization(hsSum, 256))
-print(hs.min(), np.median(hs), hs.max())
-hs = hs + (127 - np.median(hs)) # linearly center median
-# print(np.count_nonzero(hs < 0), "pixels below 0")
-if hs.min() < 0:
-	# compress negative values
-	widthBelow = 127 - hs.min()
-	hs = np.where(hs < 128, hs - (hs.min() * ((widthBelow - (hs - hs.min())) / widthBelow)), hs)
-# print(np.count_nonzero(hs == 0), "pixels at 0")
-print(hs.min(), np.median(hs), hs.max())
-print(hs.min(), np.median(hs), hs.max())
-hs_img = Image.fromarray(hs.astype(np.uint8))
-print(hs_img.mode, len(hs_img.getcolors()))
+if not args.noshade:
+	# create hillshade
+	shades = [
+		[350, 70, 0.9],
+		[15, 60, 0.7],
+		[270, 55, 1]
+	]
+	slopeForShade, aspectForShade = hillshadePreparations(arrForShade)
+	hsSum = None
+	for shade in shades:
+		hs = hillshade(arrForShade, shade[0], shade[1], slopeForShade, aspectForShade) * shade[2]
+		# Image.fromarray(hs.astype(np.uint8)).save(os.path.expanduser('~/color_out_of_earth/hs-{}-{}-{}.tif'.format(*shade)))
+		if hsSum is None:
+			hsSum = hs
+		else:
+			hsSum += hs
+	hs = (0.9 * autocontrast(hsSum, 255)) + (0.1 * image_histogram_equalization(hsSum, 256))
+	print(hs.min(), np.median(hs), hs.max())
+	hs = hs + (127 - np.median(hs)) # linearly center median
+	# print(np.count_nonzero(hs < 0), "pixels below 0")
+	if hs.min() < 0:
+		# compress negative values
+		widthBelow = 127 - hs.min()
+		hs = np.where(hs < 128, hs - (hs.min() * ((widthBelow - (hs - hs.min())) / widthBelow)), hs)
+	# print(np.count_nonzero(hs == 0), "pixels at 0")
+	print(hs.min(), np.median(hs), hs.max())
+	print(hs.min(), np.median(hs), hs.max())
+	hs_img = Image.fromarray(hs.astype(np.uint8))
+	print(hs_img.mode, len(hs_img.getcolors()))
 
 # pick hues
 ah, bh, ch = None, None, None
@@ -655,7 +663,7 @@ if ch is None:
 print('hues:', ah, bh, ch)
 
 # pick lightnesses
-darkMidLight = [random.randint(5,25), random.randint(40, 60), random.randint(75,95)]
+darkMidLight = [random.randint(5,30), random.randint(35, 65), random.randint(70,97)]
 lOrders = [
 	[0, 1, 2],
 	[2, 0, 1],
@@ -724,24 +732,32 @@ color_el_img = colorizeWithInterpolation(el_img, i)
 # colorize water bodies
 waterColor = highestChromaColor(darkMidLight[0], random.choice([bh,ch]))
 waterInterpol = coloraide.Color('srgb', [0, 0, 0], 0).interpolate(waterColor)
-wbd_img = Image.fromarray(wbd_arr).filter(ImageFilter.GaussianBlur(radius=0.67))
-color_wbd_img = colorizeWithInterpolation(wbd_img, waterInterpol, True)
-color_wbd_img.save(os.path.expanduser('~/color_out_of_earth/wbd.tif'))
+if not wbd_arr is None:
+	wbd_img = Image.fromarray(wbd_arr).filter(ImageFilter.GaussianBlur(radius=0.67))
+	color_wbd_img = colorizeWithInterpolation(wbd_img, waterInterpol, True)
+	color_wbd_img.save(os.path.expanduser('~/color_out_of_earth/wbd.tif'))
 
-# blend colorized elevation with hillshade
-color_el_arr = np.array(color_el_img.convert('RGBA'))
-hs_arr = np.array(hs_img.convert('RGBA'))
-blended_float = overlay(color_el_arr.astype(float), hs_arr.astype(float), 1)
-# blended_float = overlay(hs_arr.astype(float), color_el_arr.astype(float), 1)
-blended_arr = np.uint8(blended_float)
-blended_img = Image.fromarray(blended_arr)
+if args.noshade:
+	blended_img = color_el_img.convert('RGBA')
+else:
+	# blend colorized elevation with hillshade
+	color_el_arr = np.array(color_el_img.convert('RGBA'))
+	hs_arr = np.array(hs_img.convert('RGBA'))
+	blended_float = overlay(color_el_arr.astype(float), hs_arr.astype(float), 1)
+	# blended_float = overlay(hs_arr.astype(float), color_el_arr.astype(float), 1)
+	blended_arr = np.uint8(blended_float)
+	blended_img = Image.fromarray(blended_arr)
 
-blended_img = Image.alpha_composite(blended_img, color_wbd_img).convert('RGB')
+if wbd_arr is None:
+	blended_img = blended_img.convert('RGB')
+else:
+	blended_img = Image.alpha_composite(blended_img, color_wbd_img).convert('RGB')
 
 # save images
 # Image.fromarray(autocontrastedUint16(arr)).save(os.path.expanduser('~/color_out_of_earth/el16_img.tif'))
 # el_img.save(os.path.expanduser('~/color_out_of_earth/el_img.tif'))
-hs_img.save(os.path.expanduser('~/color_out_of_earth/hs_img.tif'))
+if not args.noshade:
+	hs_img.save(os.path.expanduser('~/color_out_of_earth/hs_img.tif'))
 # color_hs_img.save(os.path.expanduser('~/color_out_of_earth/color_hs_img.tif'))
 color_el_img.save(os.path.expanduser('~/color_out_of_earth/color_el_img.tif'))
 blended_img.save(os.path.expanduser('~/color_out_of_earth/blended_img.png'))
