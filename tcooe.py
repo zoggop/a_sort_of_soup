@@ -415,10 +415,6 @@ def downloadTilesConcurrently(tileDownloads):
 	with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
 		executor.map(downloadOneTile, tileDownloads)
 
-def extractTiles(tileDownloads):
-	for td in tileDownloads:
-		td.extractAndRead()
-
 def arrangeTiles(tileDownloads):
 	# get bounds
 	latMin, latMax, lonMin, lonMax = None, None, None, None
@@ -468,8 +464,7 @@ def downloadFromCodes(codes, username, password):
 			url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_^^^.zip'
 			zipped = 'ASTGTMV003_^^^_dem.tif'
 		tileDownloads.append(TileDownload(url, code, 'elevation', zipped, username, password))
-		if not args.nowater:
-			tileDownloads.append(TileDownload('https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_^^^.zip', code, 'waterbody', 'ASTWBDV001_^^^_dem.tif', username, password))
+		tileDownloads.append(TileDownload('https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_^^^.zip', code, 'waterbody', 'ASTWBDV001_^^^_dem.tif', username, password))
 	downloadTilesConcurrently(tileDownloads)
 	return tileDownloads
 
@@ -480,6 +475,11 @@ def allFlat(arr):
 	if len(np.unique(arr)) == 1:
 		# print("only 1 unique value in array")
 		return True
+
+def fractionAboveLevel(arr, level):
+	fraction = np.count_nonzero(arr > level) / (arr.shape[0] * arr.shape[1])
+	print(fraction, "above", level)
+	return fraction
 
 def checkOutLocationCodes(codes):
 	codesHaveSRTM, codesHaveASTER = False, False
@@ -548,7 +548,7 @@ username, password = getEOSDISlogin()
 
 arr, wbd_arr = None, None
 downloadCropAttempt = 0
-while downloadCropAttempt < 20 and allFlat(arr):
+while downloadCropAttempt < 20 and (allFlat(arr) or fractionAboveLevel(wbd_arr, 0) > 0.5):
 	codes = []
 	attempt = 0
 	# find coordinates that are within SRTM and ASTER data
@@ -576,8 +576,7 @@ while downloadCropAttempt < 20 and allFlat(arr):
 	if args.previous:
 		# use previously downloaded cropped images
 		arr = np.array(Image.open(storageDir + '/elevation-cropped.tif'))
-		if not args.nowater and os.path.exists(storageDir + '/waterbody-cropped.tif'):
-			wbd_arr = np.array(Image.open(storageDir + '/waterbody-cropped.tif'))
+		wbd_arr = np.array(Image.open(storageDir + '/waterbody-cropped.tif'))
 	else:
 		# download and arrange tiles into images
 		tiles = downloadFromCodes(codes, username, password)
@@ -591,10 +590,12 @@ while downloadCropAttempt < 20 and allFlat(arr):
 		# crop
 		arr = arr[cropY1:cropY2, cropX1:cropX2]
 		print("cropped", arr.shape, arr.min(), arr.max())
-		if not args.nowater:
-			wbd_arr = layers.get('waterbody')
-			wbd_arr = wbd_arr[cropY1:cropY2, cropX1:cropX2]
+		wbd_arr = layers.get('waterbody')
+		wbd_arr = wbd_arr[cropY1:cropY2, cropX1:cropX2]
 	downloadCropAttempt += 1
+
+if args.nowater:
+	wbd_arr = None
 
 Image.fromarray(arr).save(storageDir + '/elevation-cropped.tif')
 if not wbd_arr is None:
