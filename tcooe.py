@@ -343,6 +343,11 @@ class TileDownload:
 		self.username = username
 		self.password = password
 
+	def setStatus(self, newStatus):
+		spaces = ' ' * max(0, len(self.status or '') - len(newStatus))
+		self.status = newStatus + spaces
+		printDownloadStatus()
+
 	def streamResponseWithStatus(self):
 		if self.response is None:
 			print("no response to stream")
@@ -357,10 +362,9 @@ class TileDownload:
 			if not totalkB is None:
 				kB = min(kB, totalkB)
 				percent = int((kB / totalkB) * 100)
-				self.status = "{}% ({} / {} kB)".format(percent, kB, totalkB)
+				self.setStatus("{}% ({} / {} kB)".format(percent, kB, totalkB))
 			else:
-				self.status = "{} kB".format(kB)
-			printDownloadStatus()
+				self.setStatus("{} kB".format(kB))
 			content += chunk
 		self.content = content
 
@@ -370,14 +374,12 @@ class TileDownload:
 			self.response = response
 			self.streamResponseWithStatus()
 		elif response.url:
-			self.status = 'redirected'
-			printDownloadStatus()
+			self.setStatus('redirected')
 			attempt = 1
 			response2 = None
 			while response2 is None or response2.status_code != 200:
 				if attempt > 1:
-					self.status = "attempt  {}".format(attempt)
-					printDownloadStatus()
+					self.setStatus("attempt  {}".format(attempt))
 				try:
 					response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(self.username, self.password), headers = {'user-agent': 'Firefox'}, stream=True)
 				except:
@@ -401,6 +403,9 @@ class TileDownload:
 
 def downloadOneTile(tileDownload):
 	tileDownload.downloadWithAuth()
+	tileDownload.setStatus('extracting {} kB'.format(int(len(tileDownload.content) / 1024)))
+	tileDownload.extractAndRead()
+	tileDownload.setStatus('extracted {}'.format(tileDownload.array.shape))
 
 def downloadTilesConcurrently(tileDownloads):
 	global CurrentlyDownloading
@@ -576,7 +581,7 @@ while downloadCropAttempt < 20 and allFlat(arr):
 	else:
 		# download and arrange tiles into images
 		tiles = downloadFromCodes(codes, username, password)
-		extractTiles(tiles)
+		# extractTiles(tiles)
 		layers = arrangeTiles(tiles)
 		arr = layers.get('elevation')
 		# Image.fromarray(arr).save(storageDir + '/elevation.tif')
