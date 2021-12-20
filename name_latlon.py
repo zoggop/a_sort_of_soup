@@ -54,6 +54,7 @@ def nameLatitudeLongitude(latitude, longitude, languageCode='en'):
 		except:
 			print("could not get location with", provider)
 		finally:
+			print(provider, g)
 			if not g.address is None and g.address != '':
 				if s.get('address') is None:
 					s['address'] = g.address

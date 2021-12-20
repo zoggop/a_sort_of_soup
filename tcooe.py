@@ -469,6 +469,14 @@ def arrangeTiles(downloads):
 		outLayers[layer] = rows
 	return outLayers
 
+def allFlat(arr):
+	if arr is None:
+		print("array is none")
+		return True
+	if len(np.unique(arr)) == 1:
+		print("only 1 unique value in array")
+		return True
+
 def checkOutLocationCodes(codes):
 	codesHaveSRTM, codesHaveASTER = False, False
 	for code in codes:
@@ -528,55 +536,63 @@ else:
 	targetWidth, targetHeight = screenWidth, screenHeight
 print("output dimensions:", targetWidth, targetHeight)
 
-# pick a random location or use specified coordinates
-codes = []
-attempt = 0
-while attempt < 50 and (len(codes) == 0 or not checkOutLocationCodes(codes)):
-	# rotate to get pre-rotated target dimensions
-	if not args.rotation is None:
-		rotation = args.rotation
+arr, wbd_arr = None, None
+downloadCropAttempt = 0
+while downloadCropAttempt < 20 and allFlat(arr):
+	codes = []
+	attempt = 0
+	# find coordinates that are within SRTM and ASTER data
+	while attempt < 50 and (len(codes) == 0 or not checkOutLocationCodes(codes)):
+		# rotate to get pre-rotated target dimensions
+		if not args.rotation is None:
+			rotation = args.rotation
+		else:
+			rotation = random.randint(0, 3)
+		if rotation == 1 or rotation == 3:
+			rotatedWidth, rotatedHeight = targetHeight, targetWidth
+		else:
+			rotatedWidth, rotatedHeight = targetWidth, targetHeight
+		# pick a random location or use specified coordinates
+		if args.coordinates and attempt == 0 and downloadCropAttempt == 0:
+			latitude, longitude = args.coordinates[0], args.coordinates[1]
+		else:
+			latitude, longitude = uniformlyRandomLatLon()
+		codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel = tileListCropStretchFromLatLonCenter(latitude, longitude, rotatedWidth, rotatedHeight)
+		attempt += 1
+	# download, arrange, and crop tiles
+	print(latitude, longitude)
+	print("rotation:", rotation, rotatedWidth, rotatedHeight)
+	print(codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel)
+	if args.previous:
+		# use previously downloaded cropped images
+		arr = np.array(Image.open(os.path.expanduser('~/the_color_out_of_earth/elevation-cropped.tif')))
+		if not args.nowater and os.path.exists(os.path.expanduser('~/the_color_out_of_earth/waterbody-cropped.tif')):
+			wbd_arr = np.array(Image.open(os.path.expanduser('~/the_color_out_of_earth/waterbody-cropped.tif')))
 	else:
-		rotation = random.randint(0, 3)
-	if rotation == 1 or rotation == 3:
-		rotatedWidth, rotatedHeight = targetHeight, targetWidth
-	else:
-		rotatedWidth, rotatedHeight = targetWidth, targetHeight
-	if args.coordinates and attempt == 0:
-		latitude, longitude = args.coordinates[0], args.coordinates[1]
-	else:
-		latitude, longitude = uniformlyRandomLatLon()
-	codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel = tileListCropStretchFromLatLonCenter(latitude, longitude, rotatedWidth, rotatedHeight)
-print(latitude, longitude)
-print("rotation:", rotation, rotatedWidth, rotatedHeight)
-print(codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel)
+		# download and arrange tiles into images
+		username, password = getEOSDISlogin()
+		tiles = downloadTiles(codes, username, password)
+		extractTiles(tiles)
+		layers = arrangeTiles(tiles)
+		arr = layers.get('elevation')
+		# Image.fromarray(arr).save(os.path.expanduser('~/the_color_out_of_earth/elevation.tif'))
+		# Image.fromarray(wbd_arr).save(os.path.expanduser('~/the_color_out_of_earth/waterbody.tif'))
+		print(arr.shape)
+		print("from {:,} m to {:,} m".format(arr.min(), arr.max()))
+		# crop
+		arr = arr[cropY1:cropY2, cropX1:cropX2]
+		print("cropped", arr.shape, arr.min(), arr.max())
+		if not args.nowater:
+			wbd_arr = layers.get('waterbody')
+			wbd_arr = wbd_arr[cropY1:cropY2, cropX1:cropX2]
+	downloadCropAttempt += 1
 
-wbd_arr = None
-
-if args.previous:
-	# use previously downloaded cropped images
-	arr = np.array(Image.open(os.path.expanduser('~/the_color_out_of_earth/elevation-cropped.tif')))
-	if not args.nowater and os.path.exists(os.path.expanduser('~/the_color_out_of_earth/waterbody-cropped.tif')):
-		wbd_arr = np.array(Image.open(os.path.expanduser('~/the_color_out_of_earth/waterbody-cropped.tif')))
-else:
-	# download and arrange tiles into images
-	username, password = getEOSDISlogin()
-	tiles = downloadTiles(codes, username, password)
-	extractTiles(tiles)
-	layers = arrangeTiles(tiles)
-	arr = layers.get('elevation')
-	
-	# Image.fromarray(arr).save(os.path.expanduser('~/the_color_out_of_earth/elevation.tif'))
-	# Image.fromarray(wbd_arr).save(os.path.expanduser('~/the_color_out_of_earth/waterbody.tif'))
-	print(arr.shape)
-	print("from {:,} m to {:,} m".format(arr.min(), arr.max()))
-	# crop
-	arr = arr[cropY1:cropY2, cropX1:cropX2]
-	print("cropped", arr.shape, arr.min(), arr.max())
-	Image.fromarray(arr).save(os.path.expanduser('~/the_color_out_of_earth/elevation-cropped.tif'))
-	if not args.nowater:
-		wbd_arr = layers.get('waterbody')
-		wbd_arr = wbd_arr[cropY1:cropY2, cropX1:cropX2]
-		Image.fromarray(wbd_arr).save(os.path.expanduser('~/the_color_out_of_earth/waterbody-cropped.tif'))
+Image.fromarray(arr).save(os.path.expanduser('~/the_color_out_of_earth/elevation-cropped.tif'))
+if not wbd_arr is None:
+	Image.fromarray(wbd_arr).save(os.path.expanduser('~/the_color_out_of_earth/waterbody-cropped.tif'))
+	if allFlat(wbd_arr):
+		# ignore waterbody maps with no data
+		wbd_arr = None
 
 arr = arr.astype(np.single)
 print("astype", arr.shape, arr.min(), arr.max())
@@ -590,9 +606,8 @@ if 0 in arr and arr.min() < 0:
 	print("clipped to ocean", arr.shape, arr.min(), arr.max())
 
 # restrict waterbody image to only those areas with 0 slope, so it doesn't cut off the hillshade
-slope = slopeOfArray(arr)
-# Image.fromarray(autocontrastedUint8(slope)).save(os.path.expanduser('~/the_color_out_of_earth/slope.tif'))
 if not wbd_arr is None:
+	slope = slopeOfArray(arr)
 	wbd_arr = (slope == 0) & (wbd_arr > wbd_arr.min())
 	wbd_arr = autocontrastedUint8(wbd_arr.astype(np.uint8))
 
@@ -755,14 +770,17 @@ else:
 # el_img.save(os.path.expanduser('~/the_color_out_of_earth/el_img.tif'))
 if args.output:
 	if os.path.exists(os.path.split(args.output)[0]):
-		if os.path.splitext(args.output)[1] == '':
+		ext = os.path.splitext(args.output)[1].lower()
+		if ext == '':
 			blended_img.save(args.output, format='PNG')
+		elif ext == '.jpg' or ext == '.jpeg':
+			blended_img.save(args.output, quality=95)
 		else:
 			blended_img.save(args.output)
 else:
 	if not args.noshade:
 		hs_img.save(os.path.expanduser('~/the_color_out_of_earth/hillshade.tif'))
-	if not args.nowater:
+	if not wbd_arr is None:
 		color_wbd_img.save(os.path.expanduser('~/the_color_out_of_earth/water.tif'))
 	color_el_img.save(os.path.expanduser('~/the_color_out_of_earth/elevation_gradient.tif'))
 	blended_img.save(os.path.expanduser('~/the_color_out_of_earth/output.png'))
