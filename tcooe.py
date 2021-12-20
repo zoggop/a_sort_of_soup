@@ -33,7 +33,7 @@ from perceptual_hues_lavg import perceptualHues
 storageDir = os.path.expanduser('~/the_colour_out_of_earth')
 
 CurrentGrade = None
-CurrentlyDownloadingFiles = []
+CurrentlyDownloading = []
 StatusPrintLock = False
 
 degreesPerTheta = 90 / (math.pi / 2)
@@ -274,36 +274,6 @@ def getEOSDISlogin():
 		password = comb.decrypt(username)
 	return username, password
 
-def printDownloadStatus(overwrite=True):
-	global StatusPrintLock
-	if StatusPrintLock:
-		return
-	StatusPrintLock = True
-	if overwrite == True:
-		for d in CurrentlyDownloadingFiles:
-			sys.stdout.write("\033[F")
-	for d in CurrentlyDownloadingFiles:
-		sys.stdout.write("{} {} {}\n".format(d.get('code'), d.get('layer'), d.get('status') or ''))
-	StatusPrintLock = False
-
-def downloadResponseWithStatus(response, download):
-	totalkB = None
-	if response.headers and response.headers.get('Content-Length'):
-		totalkB = int(int(response.headers.get('Content-Length')) / 1024)
-	kB = 0
-	content = b''
-	for chunk in response.iter_content(chunk_size=1024*10):
-		kB = kB + 10
-		if not totalkB is None:
-			kB = min(kB, totalkB)
-			percent = int((kB / totalkB) * 100)
-			download['status'] = "{}% ({} / {} kB)".format(percent, kB, totalkB)
-		else:
-			download['status'] = "{} kB".format(kB)
-		printDownloadStatus()
-		content += chunk
-	return content
-
 def listFD(url, ext=''):
     response = requests.get(url)
     if response.status_code != 200:
@@ -346,78 +316,116 @@ def loadASTERtileList():
 		locCodes = json.load(read_file)
 	return locCodes
 
-def downloadWithAuth(url, un, pw, download):
-	response = requests.get(url, auth = requests.auth.HTTPBasicAuth(un, pw), stream=True)
-	if response.status_code == 200:
-		return downloadResponseWithStatus(response2, download)
-	elif response.url:
-		download['status'] = 'redirected'
-		printDownloadStatus()
-		attempt = 1
-		response2 = None
-		while response2 is None or response2.status_code != 200:
-			try:
-				response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(un, pw), headers = {'user-agent': 'Firefox'}, stream=True)
-			except:
-				response2 = None
-			attempt += 1
-		return downloadResponseWithStatus(response2, download)
+# downloads.append({'url':url, 'code':code, 'layer':'elevation', 'zipped':zipped, 'username':username, 'password':password})
 
-def extractFile(file):
-	if file.get('zipped'):
-		with ZipFile(BytesIO(file.get('content')), 'r') as zip:
-			with zip.open(file.get('zipped'), mode='r') as zippedFile:
-				ext = os.path.splitext(file.get('zipped'))[1].lower()
-				if ext == '.hgt':
+def printDownloadStatus(overwrite=True):
+	global StatusPrintLock
+	if StatusPrintLock:
+		return
+	StatusPrintLock = True
+	if overwrite == True:
+		for td in CurrentlyDownloading:
+			sys.stdout.write("\033[F")
+	for td in CurrentlyDownloading:
+		sys.stdout.write("{} {} {}\n".format(td.locationCode, td.layer, td.status or ''))
+	StatusPrintLock = False
+
+class TileDownload:
+
+	zippedFilename = None
+	status = None
+
+	def __init__(self, baseUrl, locationCode, layer, baseZippedFilename, username, password):
+		self.url = baseUrl.replace('^^^', locationCode)
+		self.zippedFilename = baseZippedFilename.replace('^^^', locationCode)
+		self.locationCode = locationCode
+		self.layer = layer
+		self.username = username
+		self.password = password
+
+	def streamResponseWithStatus(self):
+		if self.response is None:
+			print("no response to stream")
+			return
+		totalkB = None
+		if self.response.headers and self.response.headers.get('Content-Length'):
+			totalkB = int(int(self.response.headers.get('Content-Length')) / 1024)
+		kB = 0
+		content = b''
+		for chunk in self.response.iter_content(chunk_size=1024*10):
+			kB = kB + 10
+			if not totalkB is None:
+				kB = min(kB, totalkB)
+				percent = int((kB / totalkB) * 100)
+				self.status = "{}% ({} / {} kB)".format(percent, kB, totalkB)
+			else:
+				self.status = "{} kB".format(kB)
+			printDownloadStatus()
+			content += chunk
+		self.content = content
+
+	def downloadWithAuth(self):
+		response = requests.get(self.url, auth = requests.auth.HTTPBasicAuth(self.username, self.password), stream=True)
+		if response.status_code == 200:
+			self.response = response
+			self.streamResponseWithStatus()
+		elif response.url:
+			self.status = 'redirected'
+			printDownloadStatus()
+			attempt = 1
+			response2 = None
+			while response2 is None or response2.status_code != 200:
+				if attempt > 1:
+					self.status = "attempt  {}".format(attempt)
+					printDownloadStatus()
+				try:
+					response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(self.username, self.password), headers = {'user-agent': 'Firefox'}, stream=True)
+				except:
+					response2 = None
+				attempt += 1
+			self.response = response2
+			self.streamResponseWithStatus()
+
+	def extractAndRead(self):
+		if not self.zippedFilename is None:
+			with ZipFile(BytesIO(self.content), 'r') as zf:
+				with zf.open(self.zippedFilename, mode='r') as zippedFile:
+					ext = os.path.splitext(self.zippedFilename)[1].lower()
 					raw = zippedFile.read()
-					siz = len(raw)
-					dim = int(math.sqrt(siz/2))
-					file['array'] = np.frombuffer(raw, np.dtype('>i2'), dim*dim).reshape((dim, dim))
-				elif ext == '.tif':
-					file['array'] = np.array(Image.open(BytesIO(zippedFile.read())))
+					if ext == '.hgt':
+						siz = len(raw)
+						dim = int(math.sqrt(siz/2))
+						self.array = np.frombuffer(raw, np.dtype('>i2'), dim*dim).reshape((dim, dim))
+					elif ext == '.tif':
+						self.array = np.array(Image.open(BytesIO(raw)))
 
-def downloadOneFile(file):
-	file['content'] = downloadWithAuth(file.get('url'), file.get('username'), file.get('password'), file)
+def downloadOneTile(tileDownload):
+	tileDownload.downloadWithAuth()
 
-def downloadFiles(files):
-	global CurrentlyDownloadingFiles
-	CurrentlyDownloadingFiles = files
+def downloadTilesConcurrently(tileDownloads):
+	global CurrentlyDownloading
+	CurrentlyDownloading = tileDownloads
 	print(" ")
 	printDownloadStatus(False)
 	with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-		executor.map(downloadOneFile, files)
+		executor.map(downloadOneTile, tileDownloads)
 
-def downloadTiles(codes, username, password):
-	downloads = []
-	for code in codes:
-		if SRTMlocationCodes.get(code):
-			url = 'http://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/{}.SRTMGL1.hgt.zip'.format(code)
-			zipped= '{}.hgt'.format(code)
-		elif ASTERlocationCodes.get(code):
-			url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_{}.zip'.format(code)
-			zipped = 'ASTGTMV003_{}_dem.tif'.format(code)
-		downloads.append({'url':url, 'code':code, 'layer':'elevation', 'zipped':zipped, 'username':username, 'password':password})
-		if not args.nowater:
-			downloads.append({'url':'https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_{}.zip'.format(code), 'code':code, 'layer':'waterbody', 'zipped':'ASTWBDV001_{}_dem.tif'.format(code), 'username':username, 'password':password})
-	downloadFiles(downloads)
-	return downloads
+def extractTiles(tileDownloads):
+	for td in tileDownloads:
+		td.extractAndRead()
 
-def extractTiles(downloads):
-	for d in downloads:
-		extractFile(d)
-
-def arrangeTiles(downloads):
+def arrangeTiles(tileDownloads):
 	# get bounds
 	latMin, latMax, lonMin, lonMax = None, None, None, None
 	layers = {}
-	for d in downloads:
-		lat, lon = parseLocationCode(d.get('code'))
-		layer = d.get('layer')
+	for td in tileDownloads:
+		lat, lon = parseLocationCode(td.locationCode)
+		layer = td.layer
 		if layers.get(layer) is None:
 			layers[layer] = {'lats':{}}
 		if layers.get(layer).get('lats').get(lat) is None:
 			layers[layer]['lats'][lat] = {}
-		layers[layer]['lats'][lat][lon] = d.get('array')
+		layers[layer]['lats'][lat][lon] = td.array
 		if latMin is None or lat < latMin:
 			latMin = lat
 		if latMax is None or lat > latMax:
@@ -444,6 +452,21 @@ def arrangeTiles(downloads):
 				rows = np.concatenate((rows, row), axis=0)
 		outLayers[layer] = rows
 	return outLayers
+
+def downloadFromCodes(codes, username, password):
+	tileDownloads = []
+	for code in codes:
+		if SRTMlocationCodes.get(code):
+			url = 'http://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/^^^.SRTMGL1.hgt.zip'
+			zipped = '^^^.hgt'
+		elif ASTERlocationCodes.get(code):
+			url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_^^^.zip'
+			zipped = 'ASTGTMV003_^^^_dem.tif'
+		tileDownloads.append(TileDownload(url, code, 'elevation', zipped, username, password))
+		if not args.nowater:
+			tileDownloads.append(TileDownload('https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_^^^.zip', code, 'waterbody', 'ASTWBDV001_^^^_dem.tif', username, password))
+	downloadTilesConcurrently(tileDownloads)
+	return tileDownloads
 
 def allFlat(arr):
 	if arr is None:
@@ -552,7 +575,7 @@ while downloadCropAttempt < 20 and allFlat(arr):
 			wbd_arr = np.array(Image.open(storageDir + '/waterbody-cropped.tif'))
 	else:
 		# download and arrange tiles into images
-		tiles = downloadTiles(codes, username, password)
+		tiles = downloadFromCodes(codes, username, password)
 		extractTiles(tiles)
 		layers = arrangeTiles(tiles)
 		arr = layers.get('elevation')
