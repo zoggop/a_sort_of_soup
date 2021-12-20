@@ -447,10 +447,10 @@ def arrangeTiles(downloads):
 
 def allFlat(arr):
 	if arr is None:
-		print("array is none")
+		# print("array is none")
 		return True
 	if len(np.unique(arr)) == 1:
-		print("only 1 unique value in array")
+		# print("only 1 unique value in array")
 		return True
 
 def checkOutLocationCodes(codes):
@@ -576,7 +576,7 @@ if not wbd_arr is None:
 		wbd_arr = None
 
 arr = arr.astype(np.single)
-print("astype", arr.shape, arr.min(), arr.max())
+# print("astype", arr.shape, arr.min(), arr.max())
 
 # Image.fromarray(autocontrastedUint8(arr)).save(storageDir + '/el-cropped.tif')
 
@@ -584,7 +584,7 @@ print("astype", arr.shape, arr.min(), arr.max())
 if 0 in arr and arr.min() < 0:
 	arr = np.clip(arr, 0, None)
 	# print(np.count_nonzero(arr<0))
-	print("clipped to ocean", arr.shape, arr.min(), arr.max())
+	print("clipped to ocean", arr.min(), arr.max())
 
 # restrict waterbody image to only those areas with 0 slope, so it doesn't cut off the hillshade
 if not wbd_arr is None:
@@ -624,7 +624,7 @@ if not args.noshade:
 		else:
 			hsSum += hs
 	hs = (0.9 * autocontrast(hsSum, 255)) + (0.1 * image_histogram_equalization(hsSum, 256))
-	print(hs.min(), np.median(hs), hs.max())
+	# print(hs.min(), np.median(hs), hs.max())
 	hs = hs + (127 - np.median(hs)) # linearly center median
 	# print(np.count_nonzero(hs < 0), "pixels below 0")
 	if hs.min() < 0:
@@ -632,10 +632,8 @@ if not args.noshade:
 		widthBelow = 127 - hs.min()
 		hs = np.where(hs < 128, hs - (hs.min() * ((widthBelow - (hs - hs.min())) / widthBelow)), hs)
 	# print(np.count_nonzero(hs == 0), "pixels at 0")
-	print(hs.min(), np.median(hs), hs.max())
-	print(hs.min(), np.median(hs), hs.max())
+	# print(hs.min(), np.median(hs), hs.max())
 	hs_img = Image.fromarray(hs.astype(np.uint8))
-	print(hs_img.mode, len(hs_img.getcolors()))
 
 # pick hues
 ah, bh, ch = None, None, None
@@ -718,8 +716,6 @@ if arr.max() - arr.min() > 100:
 else:
 	arr_eq = arr
 el_img = Image.fromarray(autocontrastedUint8(arr_eq))
-print(el_img.mode, len(el_img.getcolors()))
-print(el_img.size)
 
 # colorize elevation data
 color_el_img = colorizeWithInterpolation(el_img, i)
@@ -766,7 +762,7 @@ else:
 	color_el_img.save(storageDir + '/elevation_gradient.tif')
 	blended_img.save(storageDir + '/output.png')
 
-print("saved images")
+print("saved image(s)")
 
 if not args.previous:
 	# save previous info
