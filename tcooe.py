@@ -81,6 +81,9 @@ def xyMultAtLatLon(latitude, longitude, size=1):
 	yMeters = measureLatLonInMeters(latitude - halfSize, longitude, latitude + halfSize, longitude)
 	yMult = yMeters / xMeters
 	xMult = 1
+	if yMult > 4:
+		xMult = 0.25
+		yMult = yMult / 4
 	if yMult > 2:
 		xMult = 0.5
 		yMult = yMult / 2
@@ -316,8 +319,6 @@ def loadASTERtileList():
 		locCodes = json.load(read_file)
 	return locCodes
 
-# downloads.append({'url':url, 'code':code, 'layer':'elevation', 'zipped':zipped, 'username':username, 'password':password})
-
 def printDownloadStatus(overwrite=True):
 	global StatusPrintLock
 	if StatusPrintLock:
@@ -334,6 +335,8 @@ class TileDownload:
 
 	zippedFilename = None
 	status = None
+	content = None
+	array = None
 
 	def __init__(self, baseUrl, locationCode, layer, baseZippedFilename, username, password):
 		self.url = baseUrl.replace('^^^', locationCode)
@@ -347,6 +350,9 @@ class TileDownload:
 		spaces = ' ' * max(0, len(self.status or '') - len(newStatus))
 		self.status = newStatus + spaces
 		printDownloadStatus()
+
+	def blankArray(self, width=3601, height=3601):
+		self.array = np.zeros((height, width), dtype=np.uint8)
 
 	def streamResponseWithStatus(self):
 		if self.response is None:
@@ -377,19 +383,22 @@ class TileDownload:
 			self.setStatus('redirected')
 			attempt = 1
 			response2 = None
-			while response2 is None or response2.status_code != 200:
-				if attempt > 1:
-					self.setStatus("attempt  {}".format(attempt))
+			while response2 is None:
 				try:
 					response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(self.username, self.password), headers = {'user-agent': 'Firefox'}, stream=True)
-				except:
+				except requests.ConnectionError:
+					self.setStatus('retrying after {} attempt'.format(attempt))
 					response2 = None
 				attempt += 1
-			self.response = response2
-			self.streamResponseWithStatus()
+			if response2.status_code == 404:
+				self.setStatus('404')
+				self.blankArray()
+			else:
+				self.response = response2
+				self.streamResponseWithStatus()
 
 	def extractAndRead(self):
-		if not self.zippedFilename is None:
+		if not self.content is None and not self.zippedFilename is None:
 			with ZipFile(BytesIO(self.content), 'r') as zf:
 				with zf.open(self.zippedFilename, mode='r') as zippedFile:
 					ext = os.path.splitext(self.zippedFilename)[1].lower()
@@ -398,6 +407,10 @@ class TileDownload:
 						siz = len(raw)
 						dim = int(math.sqrt(siz/2))
 						self.array = np.frombuffer(raw, np.dtype('>i2'), dim*dim).reshape((dim, dim))
+					elif ext == '.raw':
+						siz = len(raw)
+						dim = int(math.sqrt(siz))
+						self.array = np.frombuffer(raw, np.uint8, dim*dim).reshape((dim, dim))
 					elif ext == '.tif':
 						self.array = np.array(Image.open(BytesIO(raw)))
 
@@ -460,11 +473,15 @@ def downloadFromCodes(codes, username, password):
 		if SRTMlocationCodes.get(code):
 			url = 'http://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/^^^.SRTMGL1.hgt.zip'
 			zipped = '^^^.hgt'
+			wbd_url = 'http://e4ftl01.cr.usgs.gov/MEASURES/SRTMSWBD.003/2000.02.11/^^^.SRTMSWBD.raw.zip'
+			wbd_zipped = '^^^.raw'
 		elif ASTERlocationCodes.get(code):
 			url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_^^^.zip'
 			zipped = 'ASTGTMV003_^^^_dem.tif'
+			wbd_url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_^^^.zip'
+			wbd_zipped = 'ASTWBDV001_^^^_dem.tif'
 		tileDownloads.append(TileDownload(url, code, 'elevation', zipped, username, password))
-		tileDownloads.append(TileDownload('https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_^^^.zip', code, 'waterbody', 'ASTWBDV001_^^^_dem.tif', username, password))
+		tileDownloads.append(TileDownload(wbd_url, code, 'waterbody', wbd_zipped, username, password))
 	downloadTilesConcurrently(tileDownloads)
 	return tileDownloads
 
@@ -476,7 +493,9 @@ def allFlat(arr):
 		# print("only 1 unique value in array")
 		return True
 
-def fractionAboveLevel(arr, level):
+def fractionAboveLevel(arr, level=None):
+	if level is None:
+		level = arr.min()
 	fraction = np.count_nonzero(arr > level) / (arr.shape[0] * arr.shape[1])
 	print(fraction, "above", level)
 	return fraction
@@ -548,7 +567,7 @@ username, password = getEOSDISlogin()
 
 arr, wbd_arr = None, None
 downloadCropAttempt = 0
-while downloadCropAttempt < 20 and (allFlat(arr) or fractionAboveLevel(wbd_arr, 0) > 0.5):
+while downloadCropAttempt < 20 and (allFlat(arr) or fractionAboveLevel(wbd_arr) > 0.5):
 	codes = []
 	attempt = 0
 	# find coordinates that are within SRTM and ASTER data
@@ -580,17 +599,15 @@ while downloadCropAttempt < 20 and (allFlat(arr) or fractionAboveLevel(wbd_arr, 
 	else:
 		# download and arrange tiles into images
 		tiles = downloadFromCodes(codes, username, password)
-		# extractTiles(tiles)
 		layers = arrangeTiles(tiles)
 		arr = layers.get('elevation')
-		# Image.fromarray(arr).save(storageDir + '/elevation.tif')
-		# Image.fromarray(wbd_arr).save(storageDir + '/waterbody.tif')
 		print(arr.shape)
 		print("from {:,} m to {:,} m".format(arr.min(), arr.max()))
 		# crop
 		arr = arr[cropY1:cropY2, cropX1:cropX2]
 		print("cropped", arr.shape, arr.min(), arr.max())
 		wbd_arr = layers.get('waterbody')
+		# Image.fromarray(wbd_arr).save(storageDir + '/wbd.tif')
 		wbd_arr = wbd_arr[cropY1:cropY2, cropX1:cropX2]
 	downloadCropAttempt += 1
 
