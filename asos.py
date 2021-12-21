@@ -778,7 +778,7 @@ el_img = Image.fromarray(autocontrastedUint8(arr_eq))
 color_el_img = colorizeWithInterpolation(el_img, i)
 
 # colorize water bodies
-waterColor = highestChromaColor(darkMidLight[0], random.choice([bh,ch]), args.maxchroma)
+waterColor = highestChromaColor(darkMidLight[random.randint(0,1)], random.choice([bh,ch]), args.maxchroma)
 waterInterpol = coloraide.Color('srgb', [0, 0, 0], 0).interpolate(waterColor)
 if not wbd_arr is None:
 	wbd_img = Image.fromarray(wbd_arr).filter(ImageFilter.GaussianBlur(radius=0.67))
