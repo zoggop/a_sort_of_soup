@@ -1,14 +1,5 @@
 import os
 import argparse
-from numpy import gradient
-from numpy import pi
-from numpy import arctan
-from numpy import arctan2
-from numpy import sin
-from numpy import cos
-from numpy import sqrt
-from numpy import zeros
-from numpy import uint8
 import numpy as np
 from PIL import Image, ImageFilter
 import math
@@ -229,27 +220,27 @@ def image_histogram_equalization(image, number_bins=65536):
 	return image_equalized.reshape(image.shape)
 
 def slopeOfArray(array):
-	gy, gx = gradient(array)
-	return sqrt(gy*gy + gx*gx)
+	gy, gx = np.gradient(array)
+	return np.sqrt(gy*gy + gx*gx)
 
 def hillshadePreparations(array):
-	x, y = gradient(array)
-	slope = pi/2. - arctan(sqrt(x*x + y*y))
-	aspect = arctan2(-x, y)
+	x, y = np.gradient(array)
+	slope = np.pi/2. - np.arctan(np.sqrt(x*x + y*y))
+	aspect = np.arctan2(-x, y)
 	return slope, aspect
 
 def hillshade(array, azimuth, angle_altitude, slope=None, aspect=None):
 	azimuth = 360.0 - azimuth
 	if slope is None:
-		x, y = gradient(array)
-		slope = pi/2. - arctan(sqrt(x*x + y*y))
+		x, y = np.gradient(array)
+		slope = np.pi/2. - np.arctan(np.sqrt(x*x + y*y))
 	if aspect is None:
-		aspect = arctan2(-x, y)
-	azimuthrad = azimuth*pi / 180.
-	altituderad = angle_altitude*pi / 180.
-	shaded = sin(altituderad) * sin(slope)\
-	 + cos(altituderad) * cos(slope)\
-	 * cos((azimuthrad - pi/2.) - aspect)
+		aspect = np.arctan2(-x, y)
+	azimuthrad = azimuth*np.pi / 180.
+	altituderad = angle_altitude*np.pi / 180.
+	shaded = np.sin(altituderad) * np.sin(slope)\
+	 + np.cos(altituderad) * np.cos(slope)\
+	 * np.cos((azimuthrad - np.pi/2.) - aspect)
 	return 255*((shaded + 1)/2)
 
 def autocontrast(arr, maxValue):
