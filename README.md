@@ -91,8 +91,8 @@ optional arguments:
 
 ## Examples
 
-![Example Terrain Map 1](example1.jpg "a lake of lava")
+![Example Terrain Map 1](example1.jpg)
 
-![Example Terrain Map 2](example2.jpg "a triangular artifact in the ASTER DEM")
+![Example Terrain Map 2](example2.jpg)
 
-![Example Terrain Map 3](example3.jpg "God's oily fingerprints")
+![Example Terrain Map 3](example3.jpg)
