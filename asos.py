@@ -279,12 +279,12 @@ def skewMedianToCenter(arr):
 	return arr * (abs(arr / med) * mult)
 
 def getEOSDISlogin():
-	if args.one_time_login == True:
+	if args.one_time_login:
 		# get login input only for this session
 		username = input('        EOSDIS username: ')
 		password = getpass('        EOSDIS password: ')
 		return username, password
-	if args.new_login == True:
+	if args.new_login:
 		# delete all stored login info
 		comb = catacomb.Catacomb(storageDir, 'reset')
 	else:
@@ -547,11 +547,11 @@ def checkOutLocationCodes(codes):
 
 def parseArguments():
 	parser = argparse.ArgumentParser(description='Create a colorful image of terrain of a random location.')
-	parser.add_argument('--new-login', action='store_true', help='Enter an Earthdata username & password and store it encrypted for future use. Overwrites currently stored login information if any.')
-	parser.add_argument('--one-time-login', action='store_true', help='Enter an Earthdata username & password to use only for this run, and do not store it.')
-	parser.add_argument('--previous', '-p', action='store_true', help='Use previously downloaded data. --dimensions, --coordinates, and --rotation will have no effect.')
-	parser.add_argument('--no-water', '-w', action='store_true', help='Do not download or draw bodies of water.')
-	parser.add_argument('--no-shade', '-s', action='store_true', help='Do not hillshade the terrain. This leaves only gradient-mapped elevations and water bodies.')
+	parser.add_argument('--new-login', action='store_true', default=False, help='Enter an Earthdata username & password and store it encrypted for future use. Overwrites currently stored login information if any.')
+	parser.add_argument('--one-time-login', action='store_true', default=False, help='Enter an Earthdata username & password to use only for this run, and do not store it.')
+	parser.add_argument('--previous', '-p', action='store_true', default=False, help='Use previously downloaded data. --dimensions, --coordinates, and --rotation will have no effect.')
+	parser.add_argument('--no-water', '-w', action='store_true', default=False, help='Do not download or draw bodies of water.')
+	parser.add_argument('--no-shade', '-s', action='store_true', default=False, help='Do not hillshade the terrain. This leaves only gradient-mapped elevations and water bodies.')
 	parser.add_argument('--output', '-o', nargs='?', type=str, metavar='FILEPATH', help='Path to save output image. If not specified, will save to ~/the_colour_out_of_earth/output.png along with elevation_gradient.tif, hillshade.tif, and water.tif')
 	parser.add_argument('--coordinates', '-c', nargs=2, type=float, metavar=('LATITUDE', 'LONGITUDE'), help='Location of center of desired image in latitude longitude coordinates. If not specified, a random location will be chosen.')
 	parser.add_argument('--dimensions', '-d', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'), help='Width and height in pixels of output image. Larger images will require downloading more source tiles. Defaults to screen dimensions.')
@@ -559,12 +559,12 @@ def parseArguments():
 	parser.add_argument('--maxchroma', nargs='?', type=float, default=134, metavar='0-134', help='Maximum chroma of image.')
 	parser.add_argument('--hue-delta', nargs='?', type=int, metavar='Delta-E', help='Minimum color difference between hues as calculated by CIE Delta-E 2000 at 57 lightness and 32 chroma. Values over 35 will usually cause Delta-E between hues to be uneven. If not specified, this will be chosen randomly between 20 and 40.')
 	parser.add_argument('--lightnesses', nargs='+', type=int, metavar='0-100', help='Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
-	parser.add_argument('--chromas', nargs='+', type=int, metavar='0-134', help='Up to three chromas, in order of elevation. The remaining chromas will be chosen randomly.')
-	parser.add_argument('--hues', nargs='+', type=int, metavar='0-359', help='Up to three hues, in order of elevation. The remaining hues will be chosen randomly.')
+	parser.add_argument('--chromas', nargs='+', type=int, metavar='0-134', help='Up to three chromas, in order of elevation. The remaining chromas will be chosen randomly. To specify only the second and/or third chroma, enter chromas of -1 to have them chosen randomly.')
+	parser.add_argument('--hues', nargs='+', type=int, metavar='0-359', help='Up to three hues, in order of elevation. The remaining hues will be chosen randomly. To specify only the second and/or third hue, enter hues of -1 to have them chosen randomly.')
 	return parser.parse_args()
 
 args = parseArguments()
-if args.hue_delta == None:
+if args.hue_delta is None:
 	args.hue_delta = random.randint(20, 40)
 
 if not os.path.exists(storageDir):
@@ -590,7 +590,7 @@ if args.previous and os.path.exists(storageDir + '/previous.json'):
 		args.coordinates = [float(previousInfo.get('latitude')), float(previousInfo.get('longitude'))]
 		args.dimensions = [int(previousInfo.get('width')), int(previousInfo.get('height'))]
 
-if args.dimensions:
+if not args.dimensions is None:
 	targetWidth, targetHeight = args.dimensions[0], args.dimensions[1]
 else:
 	targetWidth, targetHeight = screenWidth, screenHeight
@@ -616,7 +616,7 @@ while downloadCropAttempt < 20 and (allFlat(arr) or fractionAboveLevel(wbd_arr) 
 		else:
 			rotatedWidth, rotatedHeight = targetWidth, targetHeight
 		# pick a random location or use specified coordinates
-		if args.coordinates and attempt == 0 and downloadCropAttempt == 0:
+		if not args.coordinates is None and attempt == 0 and downloadCropAttempt == 0:
 			latitude, longitude = args.coordinates[0], args.coordinates[1]
 		else:
 			latitude, longitude = uniformlyRandomLatLon()
@@ -718,16 +718,27 @@ if not args.no_shade:
 # pick hues
 print("hue Delta-E:", args.hue_delta)
 ah, bh, ch = None, None, None
-if args.hues:
-	ah = args.hues[0]
-	if len(args.hues) > 1:
-		bh = args.hues[1] 
-	if len(args.hues) > 2:
+if not args.hues is None:
+	if args.hues[0] > -1:
+		ah = args.hues[0]
+	if len(args.hues) > 1 and args.hues[1] > -1:
+		bh = args.hues[1]
+	if len(args.hues) > 2 and args.hues[2] > -1:
 		ch = args.hues[2]
 if ah is None:
-	ah = perceptuallyUniformRandomHue()
+	if bh is None and ch is None:
+		ah = perceptuallyUniformRandomHue()
+	elif bh is None:
+		ah = nextHueByDeltaE([ch], args.hue_delta)
+	elif ch is None:
+		ah = nextHueByDeltaE([bh], args.hue_delta)
+	else:
+		ah = nextHueByDeltaE([bh,ch], args.hue_delta)
 if bh is None:
-	bh = nextHueByDeltaE([ah], args.hue_delta)
+	if ch is None:
+		bh = nextHueByDeltaE([ah], args.hue_delta)
+	else:
+		bh = nextHueByDeltaE([ah,ch], args.hue_delta)
 if ch is None:
 	ch = nextHueByDeltaE([ah,bh], args.hue_delta)
 print('hues:', ah, bh, ch)
@@ -740,13 +751,13 @@ lOrders = [
 	[1, 0, 2],
 	[0, 2, 1]]
 lOrder = random.choice(lOrders)
-if args.lightnesses:
+if not args.lightnesses is None:
 	if len(args.lightnesses) == 1:
 		lOrder = random.choice([lOrders[0], lOrders[3]])
 	if len(args.lightnesses) == 2:
 		lOrder = lOrders[0]
 ls = [darkMidLight[lOrder[0]], darkMidLight[lOrder[1]], darkMidLight[lOrder[2]]]
-if args.lightnesses:
+if not args.lightnesses is None:
 	if len(args.lightnesses) == 1:
 		ls = [args.lightnesses[0], ls[1], ls[2]]
 	elif len(args.lightnesses) == 2:
@@ -756,14 +767,12 @@ if args.lightnesses:
 print('lightnesses:', *ls)
 
 # pick chromas
-chromas = [None, None, None]
-if args.chromas:
-	cIndex = 0
-	for chroma in args.chromas:
-		chromas[cIndex] = chroma
-		cIndex += 1	
+chromas = []
 for cIndex in range(0, 3):
-	chromas[cIndex] = chromas[cIndex] or (random.randint(0,1) == 1 and random.randint(0, args.maxchroma)) or args.maxchroma
+	if not args.chromas is None and len(args.chromas) > cIndex and args.chromas[cIndex] > -1:
+		chromas.append(args.chromas[cIndex])
+	else:
+		chromas.append((random.randint(0,1) == 1 and random.randint(0, args.maxchroma)) or args.maxchroma)
 print('chromas:', chromas)
 
 # create gradient
@@ -822,7 +831,7 @@ else:
 
 # save images
 # el_img.save(storageDir + '/el_img.tif')
-if args.output:
+if not args.output is None:
 	if os.path.exists(os.path.split(args.output)[0]):
 		ext = os.path.splitext(args.output)[1].lower()
 		if ext == '':
