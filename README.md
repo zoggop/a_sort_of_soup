@@ -1,5 +1,7 @@
 # A Sort of Soup
-### (The Colour Out of Earth)
+### or, The Colour Out of Earth
+
+> You see it is so easy for you sitting in Tavistock Square to look inward; but I find it very difficult to look inward when I am also looking at the coast of Sinai; and very difficult to look at the coast of Sinai when I am also looking inward and finding the image of Virginia everywhere. So this combination makes my letter more dumb than usual.
 
 > You have a little compartment for the Press, and another little compartment for Mary Hutchinison, and another for Vita, and another for Dog Grizzle, and another for the Downs, and another for London fogs, and another for the Prince of Wales, and another for the lighthouse, no, I'm wrong, the lighthouse is allowed to play its beam over the whole lot, and their only Common Denominator is your own excitability over whichever compartment you choose to look into at the moment. But with me they all run together into a sort of soup.
 
