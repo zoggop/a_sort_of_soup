@@ -4,6 +4,8 @@ import traceback
 import pickle
 from pbkdf2 import PBKDF2
 from Crypto.Cipher import AES
+import string
+import random
 
 # adapted from:
 # https://infotechbrain.com/2018/09/examples-of-python-password-encryption-stored-in-a-file/
@@ -14,12 +16,28 @@ class Catacomb:
     BLOCK_SIZE = 16  # 16-bit blocks
     IV_SIZE = 16  # 128-bits to initialize
     SALT_SIZE = 8  # 64-bits of salt
+    SEED_SIZE = 18 # 18 byte random seed string
 
-    def __init__(self, directory, seed):
-        self.directory = directory
-        self.SEED = seed
+    def __init__(self, directory, seed=None):
         self.KP_FILE = '{}/kfileNsxConfigVerfiy.p'.format(directory)
         self.SDB_FILE = '{}/sdbfileNsxConfigVerify'.format(directory)
+        self.SEED_FILE = '{}/catacomb.seed'.format(directory)
+        if seed == 'reset':
+            # erase all stored data and create a new seed
+            os.remove(self.KP_FILE)
+            os.remove(self.SDB_FILE)
+            os.remove(self.SEED_FILE)
+            seed = None
+        if seed is None:
+            if os.path.exists(self.SEED_FILE):
+                with open(self.SEED_FILE, 'r') as seedfile:
+                    seed = seedfile.read().strip()
+            if seed is None or seed == '':
+                seed = ''.join(random.choice(string.ascii_letters + string.digits) for i in range(self.SEED_SIZE))
+                with open(self.SEED_FILE, 'w') as seedfile:
+                    seedfile.write(seed)
+        self.directory = directory
+        self.SEED = seed
         try:
             with open(self.KP_FILE, 'rb') as f:
                 self.kp = f.read()

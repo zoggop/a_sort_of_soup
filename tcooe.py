@@ -259,9 +259,18 @@ def skewMedianToCenter(arr):
 	return arr * (abs(arr / med) * mult)
 
 def getEOSDISlogin():
-	comb = catacomb.Catacomb(storageDir, 'uR7UtrczNUM0FnzR8X')
+	if args.one_time_login == True:
+		# get login input only for this session
+		username = input('        EOSDIS username: ')
+		password = getpass('        EOSDIS password: ')
+		return username, password
+	if args.new_login == True:
+		# delete all stored login info
+		comb = catacomb.Catacomb(storageDir, 'reset')
+	else:
+		comb = catacomb.Catacomb(storageDir)
 	username = comb.decrypt('eosdis_username')
-	if username == None:
+	if username is None:
 		username = input('        EOSDIS username: ')
 		password, password2 = 'unlike', 'theother'
 		attempts = 0
@@ -518,9 +527,11 @@ def checkOutLocationCodes(codes):
 
 def parseArguments():
 	parser = argparse.ArgumentParser(description='Create a colorful image of terrain of a random location.')
+	parser.add_argument('--new-login', action='store_true', help='Enter an Earthdata username & password and store it encrypted for future use. Overwrites currently stored login information if any.')
+	parser.add_argument('--one-time-login', action='store_true', help='Enter an Earthdata username & password to use only for this run, and do not store it.')
 	parser.add_argument('--previous', '-p', action='store_true', help='Use previously downloaded data. --dimensions, --coordinates, and --rotation will have no effect.')
-	parser.add_argument('--nowater', '-w', action='store_true', help='Do not download or draw bodies of water.')
-	parser.add_argument('--noshade', '-s', action='store_true', help='Do not hillshade the terrain. This leaves only gradient-mapped elevations and water bodies.')
+	parser.add_argument('--no-water', '-w', action='store_true', help='Do not download or draw bodies of water.')
+	parser.add_argument('--no-shade', '-s', action='store_true', help='Do not hillshade the terrain. This leaves only gradient-mapped elevations and water bodies.')
 	parser.add_argument('--output', '-o', nargs='?', type=str, metavar='FILEPATH', help='Path to save output image. If not specified, will save to ~/the_colour_out_of_earth/output.png along with elevation_gradient.tif, hillshade.tif, and water.tif')
 	parser.add_argument('--coordinates', '-c', nargs=2, type=float, metavar=('LATITUDE', 'LONGITUDE'), help='Location of center of desired image in latitude longitude coordinates. If not specified, a random location will be chosen.')
 	parser.add_argument('--dimensions', '-d', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'), help='Width and height in pixels of output image. Larger images will require downloading more source tiles.')
@@ -567,7 +578,7 @@ username, password = getEOSDISlogin()
 
 arr, wbd_arr = None, None
 downloadCropAttempt = 0
-while downloadCropAttempt < 20 and (allFlat(arr) or fractionAboveLevel(wbd_arr) > 0.5):
+while downloadCropAttempt < 20 and (allFlat(arr) or fractionAboveLevel(wbd_arr) > 0.9):
 	codes = []
 	attempt = 0
 	# find coordinates that are within SRTM and ASTER data
@@ -611,7 +622,7 @@ while downloadCropAttempt < 20 and (allFlat(arr) or fractionAboveLevel(wbd_arr) 
 		wbd_arr = wbd_arr[cropY1:cropY2, cropX1:cropX2]
 	downloadCropAttempt += 1
 
-if args.nowater:
+if args.no_water:
 	wbd_arr = None
 
 Image.fromarray(arr).save(storageDir + '/elevation-cropped.tif')
@@ -653,7 +664,7 @@ print("rotated", arr.shape, arr.min(), arr.max())
 arrForShade = arr / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
 print("for shade", arrForShade.min(), arrForShade.max())
 
-if not args.noshade:
+if not args.no_shade:
 	# create hillshade
 	shades = [
 		[350, 70, 0.9],
@@ -773,7 +784,7 @@ if not wbd_arr is None:
 	wbd_img = Image.fromarray(wbd_arr).filter(ImageFilter.GaussianBlur(radius=0.67))
 	color_wbd_img = colorizeWithInterpolation(wbd_img, waterInterpol, True)
 
-if args.noshade:
+if args.no_shade:
 	blended_img = color_el_img.convert('RGBA')
 else:
 	# blend colorized elevation with hillshade
@@ -801,7 +812,7 @@ if args.output:
 		else:
 			blended_img.save(args.output)
 else:
-	if not args.noshade:
+	if not args.no_shade:
 		hs_img.save(storageDir + '/hillshade.tif')
 	if not wbd_arr is None:
 		color_wbd_img.save(storageDir + '/water.tif')
