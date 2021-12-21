@@ -168,6 +168,26 @@ def huesDeltaE(hueA, hueB):
 	b = lch_to_rgb(57, 32, hueB)
 	return a.delta_e(b, method='2000')
 
+def nextHueByDeltaE(hues, targetDeltaE):
+	negative = random.choice([False, True])
+	hue = random.choice(hues)
+	fallbackDeltaE, fallbackHue = None, None
+	for hueAdd in range(int(targetDeltaE * 0.75), 359):
+		if negative == True:
+			hueAdd = 0 - hueAdd
+		newHue = (hue + hueAdd) % 360
+		deltaE = 130
+		for h in hues:
+			deltaE = min(deltaE, huesDeltaE(h, newHue))
+		if deltaE >= targetDeltaE:
+			# print(deltaE, hueAdd)
+			return newHue
+		if fallbackDeltaE is None or deltaE > fallbackDeltaE:
+			fallbackDeltaE = deltaE
+			fallbackHue = newHue
+	# print("fallback", fallbackDeltaE)
+	return fallbackHue
+
 def gradeFunc(v):
 	return CurrentGrade[v]
 
@@ -534,15 +554,18 @@ def parseArguments():
 	parser.add_argument('--no-shade', '-s', action='store_true', help='Do not hillshade the terrain. This leaves only gradient-mapped elevations and water bodies.')
 	parser.add_argument('--output', '-o', nargs='?', type=str, metavar='FILEPATH', help='Path to save output image. If not specified, will save to ~/the_colour_out_of_earth/output.png along with elevation_gradient.tif, hillshade.tif, and water.tif')
 	parser.add_argument('--coordinates', '-c', nargs=2, type=float, metavar=('LATITUDE', 'LONGITUDE'), help='Location of center of desired image in latitude longitude coordinates. If not specified, a random location will be chosen.')
-	parser.add_argument('--dimensions', '-d', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'), help='Width and height in pixels of output image. Larger images will require downloading more source tiles.')
+	parser.add_argument('--dimensions', '-d', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'), help='Width and height in pixels of output image. Larger images will require downloading more source tiles. Defaults to screen dimensions.')
 	parser.add_argument('--rotation', '-r', nargs='?', type=int, metavar='0-3', help='How many times 90 degrees to rotate. (0: North is up. 1: East is up. 2: South is up. 3: West is up.) If not specified, this will be chosen randomly.')
 	parser.add_argument('--maxchroma', nargs='?', type=float, default=134, metavar='0-134', help='Maximum chroma of image.')
+	parser.add_argument('--hue-delta', nargs='?', type=int, metavar='Delta-E', help='Minimum color difference between hues as calculated by CIE Delta-E 2000 at 57 lightness and 32 chroma. Values over 35 will usually cause Delta-E between hues to be uneven. If not specified, this will be chosen randomly between 20 and 40.')
 	parser.add_argument('--lightnesses', nargs='+', type=int, metavar='0-100', help='Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
 	parser.add_argument('--chromas', nargs='+', type=int, metavar='0-134', help='Up to three chromas, in order of elevation. The remaining chromas will be chosen randomly.')
 	parser.add_argument('--hues', nargs='+', type=int, metavar='0-359', help='Up to three hues, in order of elevation. The remaining hues will be chosen randomly.')
 	return parser.parse_args()
 
 args = parseArguments()
+if args.hue_delta == None:
+	args.hue_delta = random.randint(20, 40)
 
 if not os.path.exists(storageDir):
 	os.makedirs(storageDir)
@@ -693,6 +716,7 @@ if not args.no_shade:
 	hs_img = Image.fromarray(hs.astype(np.uint8))
 
 # pick hues
+print("hue Delta-E:", args.hue_delta)
 ah, bh, ch = None, None, None
 if args.hues:
 	ah = args.hues[0]
@@ -703,13 +727,9 @@ if args.hues:
 if ah is None:
 	ah = perceptuallyUniformRandomHue()
 if bh is None:
-	bh = ah
-	while huesDeltaE(ah, bh) < 20 or huesDeltaE(ah, bh) > 40:
-		bh = perceptuallyUniformRandomHue()
+	bh = nextHueByDeltaE([ah], args.hue_delta)
 if ch is None:
-	ch = ah
-	while huesDeltaE(ch, ah) < 20 or huesDeltaE(ch, bh) < 20 or (huesDeltaE(ch, ah) > 40 and huesDeltaE(ch, bh) > 40):
-		ch = perceptuallyUniformRandomHue()
+	ch = nextHueByDeltaE([ah,bh], args.hue_delta)
 print('hues:', ah, bh, ch)
 
 # pick lightnesses
