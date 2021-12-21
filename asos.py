@@ -30,7 +30,7 @@ from screeninfo import get_monitors
 import catacomb
 from perceptual_hues_lavg import perceptualHues
 
-storageDir = os.path.expanduser('~/the_colour_out_of_earth')
+storageDir = os.path.expanduser('~/a_sort_of_soup')
 
 CurrentGrade = None
 CurrentlyDownloading = []
