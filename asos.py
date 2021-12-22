@@ -633,7 +633,6 @@ while downloadCropAttempt < 20 and (arr is None or wbd_arr is None or allFlat(ar
 			latitude, longitude = uniformlyRandomLatLon()
 		downloadContainer = Container(latitude, longitude, rotatedWidth, rotatedHeight)
 		attempt += 1
-	# download, arrange, and crop tiles
 	print(latitude, longitude)
 	print("rotation:", rotation, rotatedWidth, rotatedHeight)
 	downloadContainer.report()
@@ -648,15 +647,11 @@ while downloadCropAttempt < 20 and (arr is None or wbd_arr is None or allFlat(ar
 		wbd_arr = downloadContainer.layers.get('waterbody')
 	downloadCropAttempt += 1
 
-if args.no_water:
-	wbd_arr = None
-
 Image.fromarray(arr).save(storageDir + '/elevation-cropped.tif')
-if not wbd_arr is None:
-	Image.fromarray(wbd_arr).save(storageDir + '/waterbody-cropped.tif')
-	if allFlat(wbd_arr):
-		# ignore waterbody maps with no data
-		wbd_arr = None
+Image.fromarray(wbd_arr).save(storageDir + '/waterbody-cropped.tif')
+if args.no_water or allFlat(wbd_arr):
+	# ignore waterbody maps if not being drawn or with no data
+	wbd_arr = None
 
 arr = arr.astype(np.single)
 # print("astype", arr.shape, arr.min(), arr.max())
