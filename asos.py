@@ -24,9 +24,6 @@ from perceptual_hues_lavg import perceptualHues
 storageDir = os.path.expanduser('~/a_sort_of_soup')
 
 CurrentGrade = None
-CurrentlyDownloading = []
-CurrentCrop = []
-CurrentDownloadOverrideStop = False
 StatusPrintLock = False
 
 degreesPerTheta = 90 / (math.pi / 2)

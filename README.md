@@ -51,7 +51,7 @@ optional arguments:
                         gradient-mapped elevations and water bodies.
   --output [FILEPATH], -o [FILEPATH]
                         Path to save output image. If not specified, will save
-                        to ~/the_colour_out_of_earth/output.png along with
+                        to ~/a_sort_of_soup/output.png along with
                         elevation_gradient.tif, hillshade.tif, and water.tif
   --coordinates LATITUDE LONGITUDE, -c LATITUDE LONGITUDE
                         Location of center of desired image in latitude
