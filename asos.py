@@ -25,6 +25,8 @@ storageDir = os.path.expanduser('~/a_sort_of_soup')
 
 CurrentGrade = None
 CurrentlyDownloading = []
+CurrentCrop = []
+CurrentDownloadOverrideStop = False
 StatusPrintLock = False
 
 degreesPerTheta = 90 / (math.pi / 2)
@@ -79,37 +81,6 @@ def xyMultAtLatLon(latitude, longitude, size=1):
 		xMult = 0.5
 		yMult = yMult / 2
 	return xMult, yMult, xMeters, yMeters
-
-def tileListCropStretchFromLatLonCenter(latitude, longitude, width, height):
-	xMult, yMult, xMeters, yMeters = xyMultAtLatLon(latitude, longitude, 1)
-	cropWidth = int(width / xMult)
-	cropHeight = int(height / yMult)
-	lonWidth = cropWidth / 3601
-	latHeight = cropHeight / 3601
-	lonMin = longitude - (lonWidth / 2)
-	if lonMin < -180:
-		lonMin += 360
-	lonMax = longitude + (lonWidth / 2)
-	if lonMax > 180:
-		lonMax -= 360
-	latMin = latitude - (latHeight / 2)
-	latMax = latitude + (latHeight / 2)
-	if latMin < -90:
-		latMax -= 90 + latMin
-		latMin = -90
-	if latMax > 90:
-		latMin -= latMax - 90
-		latMax = 90
-	codes = {}
-	for lat in range(math.floor(latMax), math.floor(latMin)-1, -1):
-			for lon in range(math.floor(lonMin), math.floor(lonMax)+1):
-				codes[latLonToLocationCode(lat, lon)] = True
-	cropX1 = int((lonMin - math.floor(lonMin)) * 3601)
-	cropX2 = cropX1 + cropWidth
-	cropY1 = int((math.ceil(latMax) - latMax) * 3601)
-	cropY2 = cropY1 + cropHeight
-	metersPerPixel = xMeters / 3601
-	return [*codes], cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel
 
 def asInt(intStr):
 	try:
@@ -339,17 +310,21 @@ def loadASTERtileList():
 		locCodes = json.load(read_file)
 	return locCodes
 
-def printDownloadStatus(overwrite=True):
-	global StatusPrintLock
-	if StatusPrintLock:
-		return
-	StatusPrintLock = True
-	if overwrite == True:
-		for td in CurrentlyDownloading:
-			sys.stdout.write("\033[F")
+def doWaterBodyTestIfPossible():
+	global CurrentDownloadOverrideStop
+	# print("waterbody testing\n\n")
 	for td in CurrentlyDownloading:
-		sys.stdout.write("{} {} {}\n".format(td.locationCode, td.layer, td.status or ''))
-	StatusPrintLock = False
+		if td.layer == 'waterbody' and td.array is None:
+			# print("waterbody incomplete\n\n")
+			return None
+	# print("waterbody complete\n\n")
+	wbd_temp_arr = arrangeTiles(CurrentlyDownloading, 'waterbody')
+	# print("tiles arranged\n\n")
+	cropX1, cropX2, cropY1, cropY2 = CurrentCrop[0], CurrentCrop[1], CurrentCrop[2], CurrentCrop[3]
+	wbd_temp_arr = wbd_temp_arr[cropY1:cropY2, cropX1:cropX2]
+	if allFlat(wbd_temp_arr) or fractionAboveLevel(wbd_temp_arr) > 0.9:
+		# print("stop downloading\n\n")
+		CurrentDownloadOverrideStop = True
 
 class TileDownload:
 
@@ -358,18 +333,19 @@ class TileDownload:
 	content = None
 	array = None
 
-	def __init__(self, baseUrl, locationCode, layer, baseZippedFilename, username, password):
+	def __init__(self, baseUrl, locationCode, layer, baseZippedFilename, username, password, container):
 		self.url = baseUrl.replace('^^^', locationCode)
 		self.zippedFilename = baseZippedFilename.replace('^^^', locationCode)
 		self.locationCode = locationCode
 		self.layer = layer
 		self.username = username
 		self.password = password
+		self.container = container
 
 	def setStatus(self, newStatus):
 		spaces = ' ' * max(0, len(self.status or '') - len(newStatus))
 		self.status = newStatus + spaces
-		printDownloadStatus()
+		self.container.printDownloadStatus()
 
 	def blankArray(self, width=3601, height=3601):
 		self.array = np.zeros((height, width), dtype=np.uint8)
@@ -433,77 +409,142 @@ class TileDownload:
 						self.array = np.frombuffer(raw, np.uint8, dim*dim).reshape((dim, dim))
 					elif ext == '.tif':
 						self.array = np.array(Image.open(BytesIO(raw)))
+		# doWaterBodyTestIfPossible()
+
+class Container:
+
+	StatusPrintLock = False
+	CurrentDownloadOverrideStop = False
+	
+	def __init__(self, latitude, longitude, width, height):
+		xMult, yMult, xMeters, yMeters = xyMultAtLatLon(latitude, longitude, 1)
+		cropWidth = int(width / xMult)
+		cropHeight = int(height / yMult)
+		lonWidth = cropWidth / 3601
+		latHeight = cropHeight / 3601
+		lonMin = longitude - (lonWidth / 2)
+		if lonMin < -180:
+			lonMin += 360
+		lonMax = longitude + (lonWidth / 2)
+		if lonMax > 180:
+			lonMax -= 360
+		latMin = latitude - (latHeight / 2)
+		latMax = latitude + (latHeight / 2)
+		if latMin < -90:
+			latMax -= 90 + latMin
+			latMin = -90
+		if latMax > 90:
+			latMin -= latMax - 90
+			latMax = 90
+		self.codes = {}
+		for lat in range(math.floor(latMax), math.floor(latMin)-1, -1):
+				for lon in range(math.floor(lonMin), math.floor(lonMax)+1):
+					self.codes[latLonToLocationCode(lat, lon)] = True
+		self.cropX1 = int((lonMin - math.floor(lonMin)) * 3601)
+		self.cropX2 = self.cropX1 + cropWidth
+		self.cropY1 = int((math.ceil(latMax) - latMax) * 3601)
+		self.cropY2 = self.cropY1 + cropHeight
+		self.metersPerPixel = xMeters / 3601
+		self.xMult, self.yMult = xMult, yMult
+
+	def report(self):
+		print(self.codes, self.cropX1, self.cropX2, self.cropY1, self.cropY2, self.metersPerPixel, self.xMult, self.yMult)
+
+	def printDownloadStatus(self, overwrite=True):
+		global StatusPrintLock
+		if StatusPrintLock:
+			return
+		StatusPrintLock = True
+		if overwrite == True:
+			for td in self.tileDownloads:
+				sys.stdout.write("\033[F")
+		for td in self.tileDownloads:
+			sys.stdout.write("{} {} {}\n".format(td.locationCode, td.layer, td.status or ''))
+		StatusPrintLock = False
+
+	def downloadTilesConcurrently(self):
+		print(" ")
+		self.printDownloadStatus(False)
+		with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+			executor.map(downloadOneTile, self.tileDownloads)
+
+	def download(self):
+		tileDownloads = []
+		for code in self.codes:
+			if SRTMlocationCodes.get(code):
+				url = 'http://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/^^^.SRTMGL1.hgt.zip'
+				zipped = '^^^.hgt'
+				wbd_url = 'http://e4ftl01.cr.usgs.gov/MEASURES/SRTMSWBD.003/2000.02.11/^^^.SRTMSWBD.raw.zip'
+				wbd_zipped = '^^^.raw'
+			elif ASTERlocationCodes.get(code):
+				url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_^^^.zip'
+				zipped = 'ASTGTMV003_^^^_dem.tif'
+				wbd_url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_^^^.zip'
+				wbd_zipped = 'ASTWBDV001_^^^_dem.tif'
+			tileDownloads.append(TileDownload(url, code, 'elevation', zipped, username, password, self))
+			tileDownloads.append(TileDownload(wbd_url, code, 'waterbody', wbd_zipped, username, password, self))
+		self.tileDownloads = tileDownloads
+		self.downloadTilesConcurrently()
+		return tileDownloads
+
+	def arrangeTiles(self, selectedLayer=None):
+		# get bounds
+		latMin, latMax, lonMin, lonMax = None, None, None, None
+		layers = {}
+		for td in self.tileDownloads:
+			layer = td.layer
+			if selectedLayer is None or layer == selectedLayer:
+				lat, lon = parseLocationCode(td.locationCode)
+				if layers.get(layer) is None:
+					layers[layer] = {'lats':{}}
+				if layers.get(layer).get('lats').get(lat) is None:
+					layers[layer]['lats'][lat] = {}
+				layers[layer]['lats'][lat][lon] = td.array
+				if latMin is None or lat < latMin:
+					latMin = lat
+				if latMax is None or lat > latMax:
+					latMax = lat
+				if lonMin is None or lon < lonMin:
+					lonMin = lon
+				if lonMax is None or lon > lonMax:
+					lonMax = lon
+		outLayers = {}
+		for layer in layers.keys():
+			thisLayer = layers.get(layer)
+			rows = None
+			for lat in range(latMax, latMin-1, -1):
+				row = None
+				for lon in range(lonMin, lonMax+1):
+					tileArr = thisLayer.get('lats').get(lat).get(lon)
+					if row is None:
+						row = tileArr
+					else:
+						row = np.concatenate((row, tileArr), axis=1)
+				if rows is None:
+					rows = row
+				else:
+					rows = np.concatenate((rows, row), axis=0)
+			outLayers[layer] = rows
+		return outLayers
+
+	def downloadAndCrop(self, username, password):
+		self.username, self.password = username, password
+		# download and arrange tiles into images
+		self.download()
+		if not self.CurrentDownloadOverrideStop:
+			self.layers = self.arrangeTiles()
+			for layer in self.layers.keys():
+				arr = self.layers.get(layer)
+				print("{}: {}x{}, {:,} to {:,}".format(layer, arr.shape[0], arr.shape[1], arr.min(), arr.max()))
+				arr = arr[self.cropY1:self.cropY2, self.cropX1:self.cropX2]
+				print("{} cropped: {}x{}, {:,} to {:,}".format(layer, arr.shape[0], arr.shape[1], arr.min(), arr.max()))
+				self.layers[layer] = arr
 
 def downloadOneTile(tileDownload):
 	tileDownload.downloadWithAuth()
 	tileDownload.setStatus('extracting {} kB'.format(int(len(tileDownload.content) / 1024)))
 	tileDownload.extractAndRead()
 	tileDownload.setStatus('extracted {}'.format(tileDownload.array.shape))
-
-def downloadTilesConcurrently(tileDownloads):
-	global CurrentlyDownloading
-	CurrentlyDownloading = tileDownloads
-	print(" ")
-	printDownloadStatus(False)
-	with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-		executor.map(downloadOneTile, tileDownloads)
-
-def arrangeTiles(tileDownloads):
-	# get bounds
-	latMin, latMax, lonMin, lonMax = None, None, None, None
-	layers = {}
-	for td in tileDownloads:
-		lat, lon = parseLocationCode(td.locationCode)
-		layer = td.layer
-		if layers.get(layer) is None:
-			layers[layer] = {'lats':{}}
-		if layers.get(layer).get('lats').get(lat) is None:
-			layers[layer]['lats'][lat] = {}
-		layers[layer]['lats'][lat][lon] = td.array
-		if latMin is None or lat < latMin:
-			latMin = lat
-		if latMax is None or lat > latMax:
-			latMax = lat
-		if lonMin is None or lon < lonMin:
-			lonMin = lon
-		if lonMax is None or lon > lonMax:
-			lonMax = lon
-	outLayers = {}
-	for layer in layers.keys():
-		thisLayer = layers.get(layer)
-		rows = None
-		for lat in range(latMax, latMin-1, -1):
-			row = None
-			for lon in range(lonMin, lonMax+1):
-				tileArr = thisLayer.get('lats').get(lat).get(lon)
-				if row is None:
-					row = tileArr
-				else:
-					row = np.concatenate((row, tileArr), axis=1)
-			if rows is None:
-				rows = row
-			else:
-				rows = np.concatenate((rows, row), axis=0)
-		outLayers[layer] = rows
-	return outLayers
-
-def downloadFromCodes(codes, username, password):
-	tileDownloads = []
-	for code in codes:
-		if SRTMlocationCodes.get(code):
-			url = 'http://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/^^^.SRTMGL1.hgt.zip'
-			zipped = '^^^.hgt'
-			wbd_url = 'http://e4ftl01.cr.usgs.gov/MEASURES/SRTMSWBD.003/2000.02.11/^^^.SRTMSWBD.raw.zip'
-			wbd_zipped = '^^^.raw'
-		elif ASTERlocationCodes.get(code):
-			url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_^^^.zip'
-			zipped = 'ASTGTMV003_^^^_dem.tif'
-			wbd_url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTWBD.001/2000.03.01/ASTWBDV001_^^^.zip'
-			wbd_zipped = 'ASTWBDV001_^^^_dem.tif'
-		tileDownloads.append(TileDownload(url, code, 'elevation', zipped, username, password))
-		tileDownloads.append(TileDownload(wbd_url, code, 'waterbody', wbd_zipped, username, password))
-	downloadTilesConcurrently(tileDownloads)
-	return tileDownloads
 
 def allFlat(arr):
 	if arr is None:
@@ -590,13 +631,13 @@ print("output dimensions:", targetWidth, targetHeight)
 # get encrypted EOSDIS login info
 username, password = getEOSDISlogin()
 
-arr, wbd_arr = None, None
 downloadCropAttempt = 0
-while downloadCropAttempt < 20 and (allFlat(arr) or fractionAboveLevel(wbd_arr) > 0.9):
-	codes = []
+arr, wbd_arr = None, None
+while downloadCropAttempt < 20 and (arr is None or wbd_arr is None or allFlat(arr) or fractionAboveLevel(wbd_arr) > 0.9):
+	downloadContainer = None
 	attempt = 0
 	# find coordinates that are within SRTM and ASTER data
-	while attempt < 50 and (len(codes) == 0 or not checkOutLocationCodes(codes)):
+	while attempt < 50 and (downloadContainer is None or not checkOutLocationCodes(downloadContainer.codes)):
 		# rotate to get pre-rotated target dimensions
 		if not args.rotation is None:
 			rotation = args.rotation
@@ -611,29 +652,21 @@ while downloadCropAttempt < 20 and (allFlat(arr) or fractionAboveLevel(wbd_arr) 
 			latitude, longitude = args.coordinates[0], args.coordinates[1]
 		else:
 			latitude, longitude = uniformlyRandomLatLon()
-		codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel = tileListCropStretchFromLatLonCenter(latitude, longitude, rotatedWidth, rotatedHeight)
+		downloadContainer = Container(latitude, longitude, rotatedWidth, rotatedHeight)
 		attempt += 1
 	# download, arrange, and crop tiles
 	print(latitude, longitude)
 	print("rotation:", rotation, rotatedWidth, rotatedHeight)
-	print(codes, cropX1, cropX2, cropY1, cropY2, xMult, yMult, metersPerPixel)
+	downloadContainer.report()
 	if args.previous:
 		# use previously downloaded cropped images
 		arr = np.array(Image.open(storageDir + '/elevation-cropped.tif'))
 		wbd_arr = np.array(Image.open(storageDir + '/waterbody-cropped.tif'))
 	else:
 		# download and arrange tiles into images
-		tiles = downloadFromCodes(codes, username, password)
-		layers = arrangeTiles(tiles)
-		arr = layers.get('elevation')
-		print(arr.shape)
-		print("from {:,} m to {:,} m".format(arr.min(), arr.max()))
-		# crop
-		arr = arr[cropY1:cropY2, cropX1:cropX2]
-		print("cropped", arr.shape, arr.min(), arr.max())
-		wbd_arr = layers.get('waterbody')
-		# Image.fromarray(wbd_arr).save(storageDir + '/wbd.tif')
-		wbd_arr = wbd_arr[cropY1:cropY2, cropX1:cropX2]
+		downloadContainer.downloadAndCrop(username, password)
+		arr = downloadContainer.layers.get('elevation')
+		wbd_arr = downloadContainer.layers.get('waterbody')
 	downloadCropAttempt += 1
 
 if args.no_water:
@@ -675,7 +708,7 @@ if rotation > 0:
 print("rotated", arr.shape, arr.min(), arr.max())
 
 # process elevation map for hillshading
-arrForShade = arr / metersPerPixel # so that the height map's vertical units are the same as its horizontal units
+arrForShade = arr / downloadContainer.metersPerPixel # so that the height map's vertical units are the same as its horizontal units
 print("for shade", arrForShade.min(), arrForShade.max())
 
 if not args.no_shade:
@@ -801,7 +834,7 @@ color_el_img = colorizeWithInterpolation(el_img, i)
 waterColor = highestChromaColor(darkMidLight[random.randint(0,1)], random.choice([bh,ch]), args.maxchroma)
 waterInterpol = coloraide.Color('srgb', [0, 0, 0], 0).interpolate(waterColor)
 if not wbd_arr is None:
-	wbd_img = Image.fromarray(wbd_arr).filter(ImageFilter.GaussianBlur(radius=0.67))
+	wbd_img = Image.fromarray(wbd_arr).filter(ImageFilter.GaussianBlur(radius=0.5))
 	color_wbd_img = colorizeWithInterpolation(wbd_img, waterInterpol, True)
 
 if args.no_shade:
