@@ -268,6 +268,18 @@ def getEOSDISlogin():
 		password = comb.decrypt(username)
 	return username, password
 
+def printDownloadStatus(tileDownloads, overwrite=True):
+	global StatusPrintLock
+	if StatusPrintLock:
+		return
+	StatusPrintLock = True
+	if overwrite == True:
+		for td in tileDownloads:
+			sys.stdout.write("\033[F")
+	for td in tileDownloads:
+		sys.stdout.write("{} {} {}\n".format(td.locationCode, td.layer, td.status or ''))
+	StatusPrintLock = False
+
 def listFD(url, ext=''):
     response = requests.get(url)
     if response.status_code != 200:
@@ -278,7 +290,7 @@ def listFD(url, ext=''):
 def loadSRTMtileList():
 	# get source of tile list if one hasn't been yet generated
 	if not os.path.exists(storageDir + '/srtm_tile_list.json'):
-		print('downloading SRTM tile list from https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json')
+		print('downloading SRTM tile list from https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json ...')
 		response = requests.get('https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json')
 		if response.status_code == 200:
 			locCodes = {}
@@ -298,7 +310,7 @@ def loadSRTMtileList():
 def loadASTERtileList():
 	# get source of tile list if one hasn't been yet generated
 	if not os.path.exists(storageDir + '/aster_tile_list.json'):
-		print('downloading ASTER tile list from https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/')
+		print('downloading ASTER tile list from https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ ...')
 		locCodes = {}
 		for filename in listFD('https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/', 'zip'):
 			locCode = filename[-11:-4]
@@ -329,7 +341,7 @@ class TileDownload:
 	def setStatus(self, newStatus):
 		spaces = ' ' * max(0, len(self.status or '') - len(newStatus))
 		self.status = newStatus + spaces
-		self.container.printDownloadStatus()
+		printDownloadStatus(self.container.tileDownloads)
 
 	def blankArray(self, width=3601, height=3601):
 		self.array = np.zeros((height, width), dtype=np.uint8)
@@ -431,21 +443,9 @@ class Container:
 	def report(self):
 		print('{}\n({}, {}) ({}, {})\t{:.2f} m/px\t({:.3f}*x, {:.3f}*y)'.format(self.codes, self.cropX1, self.cropY1, self.cropX2, self.cropY2, self.metersPerPixel, self.xMult, self.yMult))
 
-	def printDownloadStatus(self, overwrite=True):
-		global StatusPrintLock
-		if StatusPrintLock:
-			return
-		StatusPrintLock = True
-		if overwrite == True:
-			for td in self.tileDownloads:
-				sys.stdout.write("\033[F")
-		for td in self.tileDownloads:
-			sys.stdout.write("{} {} {}\n".format(td.locationCode, td.layer, td.status or ''))
-		StatusPrintLock = False
-
 	def downloadTilesConcurrently(self):
 		print(" ")
-		self.printDownloadStatus(False)
+		printDownloadStatus(self.tileDownloads, False)
 		with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
 			executor.map(downloadOneTile, self.tileDownloads)
 
