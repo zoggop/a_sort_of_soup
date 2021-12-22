@@ -310,22 +310,6 @@ def loadASTERtileList():
 		locCodes = json.load(read_file)
 	return locCodes
 
-def doWaterBodyTestIfPossible():
-	global CurrentDownloadOverrideStop
-	# print("waterbody testing\n\n")
-	for td in CurrentlyDownloading:
-		if td.layer == 'waterbody' and td.array is None:
-			# print("waterbody incomplete\n\n")
-			return None
-	# print("waterbody complete\n\n")
-	wbd_temp_arr = arrangeTiles(CurrentlyDownloading, 'waterbody')
-	# print("tiles arranged\n\n")
-	cropX1, cropX2, cropY1, cropY2 = CurrentCrop[0], CurrentCrop[1], CurrentCrop[2], CurrentCrop[3]
-	wbd_temp_arr = wbd_temp_arr[cropY1:cropY2, cropX1:cropX2]
-	if allFlat(wbd_temp_arr) or fractionAboveLevel(wbd_temp_arr) > 0.9:
-		# print("stop downloading\n\n")
-		CurrentDownloadOverrideStop = True
-
 class TileDownload:
 
 	zippedFilename = None
@@ -364,7 +348,7 @@ class TileDownload:
 			if not totalkB is None:
 				kB = min(kB, totalkB)
 				percent = int((kB / totalkB) * 100)
-				self.setStatus("{}% ({} / {} kB)".format(percent, kB, totalkB))
+				self.setStatus("{}% ({:,} / {:,} kB)".format(percent, kB, totalkB))
 			else:
 				self.setStatus("{} kB".format(kB))
 			content += chunk
@@ -409,13 +393,9 @@ class TileDownload:
 						self.array = np.frombuffer(raw, np.uint8, dim*dim).reshape((dim, dim))
 					elif ext == '.tif':
 						self.array = np.array(Image.open(BytesIO(raw)))
-		# doWaterBodyTestIfPossible()
 
 class Container:
 
-	StatusPrintLock = False
-	CurrentDownloadOverrideStop = False
-	
 	def __init__(self, latitude, longitude, width, height):
 		xMult, yMult, xMeters, yMeters = xyMultAtLatLon(latitude, longitude, 1)
 		cropWidth = int(width / xMult)
@@ -436,19 +416,20 @@ class Container:
 		if latMax > 90:
 			latMin -= latMax - 90
 			latMax = 90
-		self.codes = {}
+		codes = {}
 		for lat in range(math.floor(latMax), math.floor(latMin)-1, -1):
 				for lon in range(math.floor(lonMin), math.floor(lonMax)+1):
-					self.codes[latLonToLocationCode(lat, lon)] = True
+					codes[latLonToLocationCode(lat, lon)] = True
 		self.cropX1 = int((lonMin - math.floor(lonMin)) * 3601)
 		self.cropX2 = self.cropX1 + cropWidth
 		self.cropY1 = int((math.ceil(latMax) - latMax) * 3601)
 		self.cropY2 = self.cropY1 + cropHeight
 		self.metersPerPixel = xMeters / 3601
 		self.xMult, self.yMult = xMult, yMult
+		self.codes = [*codes]
 
 	def report(self):
-		print(self.codes, self.cropX1, self.cropX2, self.cropY1, self.cropY2, self.metersPerPixel, self.xMult, self.yMult)
+		print('{}\n({}, {}) ({}, {})\t{:.2f} m/px\t({:.3f}*x, {:.3f}*y)'.format(self.codes, self.cropX1, self.cropY1, self.cropX2, self.cropY2, self.metersPerPixel, self.xMult, self.yMult))
 
 	def printDownloadStatus(self, overwrite=True):
 		global StatusPrintLock
@@ -485,7 +466,6 @@ class Container:
 			tileDownloads.append(TileDownload(wbd_url, code, 'waterbody', wbd_zipped, username, password, self))
 		self.tileDownloads = tileDownloads
 		self.downloadTilesConcurrently()
-		return tileDownloads
 
 	def arrangeTiles(self, selectedLayer=None):
 		# get bounds
@@ -531,20 +511,19 @@ class Container:
 		self.username, self.password = username, password
 		# download and arrange tiles into images
 		self.download()
-		if not self.CurrentDownloadOverrideStop:
-			self.layers = self.arrangeTiles()
-			for layer in self.layers.keys():
-				arr = self.layers.get(layer)
-				print("{}: {}x{}, {:,} to {:,}".format(layer, arr.shape[0], arr.shape[1], arr.min(), arr.max()))
-				arr = arr[self.cropY1:self.cropY2, self.cropX1:self.cropX2]
-				print("{} cropped: {}x{}, {:,} to {:,}".format(layer, arr.shape[0], arr.shape[1], arr.min(), arr.max()))
-				self.layers[layer] = arr
+		self.layers = self.arrangeTiles()
+		for layer in self.layers.keys():
+			arr = self.layers.get(layer)
+			print("{}: {}x{}, {:,} to {:,}".format(layer, arr.shape[0], arr.shape[1], arr.min(), arr.max()))
+			arr = arr[self.cropY1:self.cropY2, self.cropX1:self.cropX2]
+			print("{} cropped: {}x{}, {:,} to {:,}".format(layer, arr.shape[0], arr.shape[1], arr.min(), arr.max()))
+			self.layers[layer] = arr
 
 def downloadOneTile(tileDownload):
 	tileDownload.downloadWithAuth()
-	tileDownload.setStatus('extracting {} kB'.format(int(len(tileDownload.content) / 1024)))
+	tileDownload.setStatus('extracting {:,} kB'.format(int(len(tileDownload.content) / 1024)))
 	tileDownload.extractAndRead()
-	tileDownload.setStatus('extracted {}'.format(tileDownload.array.shape))
+	tileDownload.setStatus('extracted {}x{} from {:,} kB'.format(tileDownload.array.shape[1], tileDownload.array.shape[0], int(len(tileDownload.content) / 1024)))
 
 def allFlat(arr):
 	if arr is None:
