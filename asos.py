@@ -664,7 +664,7 @@ if 0 in arr and arr.min() < 0:
 # restrict waterbody image to only those areas with 0 slope, so it doesn't cut off the hillshade
 if not wbd_arr is None:
 	slope = slopeOfArray(arr)
-	wbd_arr = (slope == 0) & (wbd_arr > wbd_arr.min())
+	wbd_arr = (slope < 0.8) & (wbd_arr > wbd_arr.min())
 	wbd_arr = autocontrastedUint8(wbd_arr.astype(np.uint8))
 
 # stretch and rotate elevation data
@@ -802,14 +802,16 @@ el_img = Image.fromarray(autocontrastedUint8(arr_eq))
 color_el_img = colorizeWithInterpolation(el_img, i)
 
 # colorize water bodies
-wABC = random.randint(0,2)
-wHues = [ah, bh, ch]
-wHues.pop(wABC)
-waterColor = highestChromaColor(darkMidLight[wABC], random.choice(wHues), args.maxchroma)
-print('water color:', waterColor.convert('lch-d65'))
-waterInterpol = coloraide.Color('srgb', [0, 0, 0], 0).interpolate(waterColor)
 if not wbd_arr is None:
-	wbd_img = Image.fromarray(wbd_arr).filter(ImageFilter.GaussianBlur(radius=0.5))
+	# pick a water color
+	wABC = random.randint(0,2)
+	wHues = [ah, bh, ch]
+	wHues.pop(wABC)
+	waterColor = highestChromaColor(darkMidLight[wABC], random.choice(wHues), args.maxchroma)
+	print('water color:', waterColor.convert('lch-d65'))
+	# colorize waterbody image
+	waterInterpol = coloraide.Color('srgb', [0, 0, 0], 0).interpolate(waterColor)
+	wbd_img = Image.fromarray(wbd_arr).filter(ImageFilter.GaussianBlur(radius=0.67))
 	color_wbd_img = colorizeWithInterpolation(wbd_img, waterInterpol, True)
 
 if args.no_shade:
