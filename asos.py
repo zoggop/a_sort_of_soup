@@ -434,11 +434,12 @@ class Container:
 		self.cropY1 = int((math.ceil(latMax) - latMax) * 3601)
 		self.cropY2 = self.cropY1 + cropHeight
 		self.metersPerPixel = xMeters / 3601
+		self.metersPerPixelAfterResize = self.metersPerPixel / xMult
 		self.xMult, self.yMult = xMult, yMult
 		self.codes = [*codes]
 
 	def report(self):
-		print('{}\n({}, {}) ({}, {})\t{:.2f} m/px\t({:.3f}*x, {:.3f}*y)'.format(self.codes, self.cropX1, self.cropY1, self.cropX2, self.cropY2, self.metersPerPixel, self.xMult, self.yMult))
+		print('{}\n({}, {}) ({}, {})\t{:.2f} m/px / {:.2f} m/px\t({:.3f}*x, {:.3f}*y)'.format(self.codes, self.cropX1, self.cropY1, self.cropX2, self.cropY2, self.metersPerPixel, self.metersPerPixelAfterResize, self.xMult, self.yMult))
 
 	def downloadTilesConcurrently(self):
 		print(" ")
@@ -679,7 +680,7 @@ if rotation > 0:
 print("rotated", arr.shape, arr.min(), arr.max())
 
 # process elevation map for hillshading
-arrForShade = arr / downloadContainer.metersPerPixel # so that the height map's vertical units are the same as its horizontal units
+arrForShade = arr / downloadContainer.metersPerPixelAfterResize # so that the height map's vertical units are the same as its horizontal units
 print("for shade", arrForShade.min(), arrForShade.max())
 
 if not args.no_shade:
