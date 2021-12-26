@@ -62,6 +62,11 @@ def uniformlyRandomLatLon():
 	lon = random.randint(-18000000, 18000000) / 100000
 	return lat, lon
 
+def longitudeDistance(lonA, lonB):
+	lonA360 = lonA + 180
+	lonB360 = lonB + 180
+	return abs(((lonA360 - lonB360) + 180) % 360 - 180)
+
 def earthRadiusInMetersAtLatitude(latitude):
 	# https://rechneronline.de/earth-radius/
 	# R = √ [ (r1² * cos(B))² + (r2² * sin(B))² ] / [ (r1 * cos(B))² + (r2 * sin(B))² ]
@@ -71,7 +76,8 @@ def earthRadiusInMetersAtLatitude(latitude):
 def measureLatLonInMeters(lat1, lon1, lat2, lon2):
 	R = earthRadiusInMetersAtLatitude((lat1 + lat2) / 2)
 	dLat = (lat2 * piPer180) - (lat1 * piPer180)
-	dLon = (lon2 * piPer180) - (lon1 * piPer180)
+	# dLon = (lon2 * piPer180) - (lon1 * piPer180)
+	dLon = longitudeDistance(lon1, lon2) * piPer180
 	a = math.sin(dLat/2) * math.sin(dLat/2) + math.cos(lat1 * piPer180) * math.cos(lat2 * piPer180) * math.sin(dLon/2) * math.sin(dLon/2)
 	c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 	d = R * c
@@ -437,10 +443,19 @@ class Container:
 		if latMax > 90:
 			latMin -= latMax - 90
 			latMax = 90
+		# print(lonMin, lonMax)
+		# print(longitudeDistance(math.floor(lonMin), math.floor(lonMax)))
 		codes = {}
 		for lat in range(math.floor(latMax), math.floor(latMin)-1, -1):
-				for lon in range(math.floor(lonMin), math.floor(lonMax)+1):
+				for lonAdd in range(0, longitudeDistance(math.floor(lonMin), math.floor(lonMax)) + 1):
+					if lonMin < 0 and lonMax > 0:
+						lon = math.floor(lonMax) + lonAdd
+					else:
+						lon = math.floor(lonMin) + lonAdd
+					if lon > 179:
+						lon -= 360
 					codes[latLonToLocationCode(lat, lon)] = True
+		# print(*codes)
 		self.cropX1 = int((lonMin - math.floor(lonMin)) * 3601)
 		self.cropX2 = self.cropX1 + cropWidth
 		self.cropY1 = int((math.ceil(latMax) - latMax) * 3601)
@@ -504,7 +519,13 @@ class Container:
 			rows = None
 			for lat in range(latMax, latMin-1, -1):
 				row = None
-				for lon in range(lonMin, lonMax+1):
+				for lonAdd in range(0, longitudeDistance(lonMin, lonMax) + 1):
+					if lonMin < 0 and lonMax > 0:
+						lon = lonMax + lonAdd
+					else:
+						lon = lonMin + lonAdd
+					if lon > 179:
+						lon -= 360
 					tileArr = thisLayer.get('lats').get(lat).get(lon)
 					if row is None:
 						row = tileArr
@@ -643,7 +664,7 @@ while downloadCropAttempt < 20 and (arr is None or wbd_arr is None or allFlat(ar
 			latitude, longitude = uniformlyRandomLatLon()
 		downloadContainer = Container(latitude, longitude, rotatedWidth, rotatedHeight)
 		attempt += 1
-	print("{:.5f} {:.5f} -r {}".format(latitude, longitude, rotation))
+	print("\n-c {:.5f} {:.5f} -r {}".format(latitude, longitude, rotation))
 	downloadContainer.report()
 	if args.previous:
 		# use previously downloaded cropped images
