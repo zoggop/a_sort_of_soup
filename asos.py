@@ -421,7 +421,7 @@ class TileDownload:
 					elif ext == '.tif':
 						self.array = np.array(Image.open(BytesIO(raw)))
 
-class Container:
+class Compartment:
 
 	def __init__(self, latitude, longitude, width, height):
 		xMult, yMult, xMeters, yMeters = xyMultAtLatLon(latitude, longitude, 1)
@@ -644,10 +644,16 @@ username, password = getEOSDISlogin()
 downloadCropAttempt = 0
 arr, wbd_arr = None, None
 while downloadCropAttempt < 20 and (arr is None or wbd_arr is None or allFlat(arr) or fractionAboveLevel(wbd_arr) > 0.9):
-	downloadContainer = None
+	if not args.coordinates is None and downloadCropAttempt > 0:
+		print("specified coordinates {:.5f} {:.5f} with output dimensions {}x{} and rotation {} contain insufficient land area".format(latitude, longitude, targetWidth, targetHeight, rotation))
+		exit()
+	downloadCompartment = None
 	attempt = 0
 	# find coordinates that are within SRTM and ASTER data
-	while attempt < 50 and (downloadContainer is None or not checkOutLocationCodes(downloadContainer.codes)):
+	while attempt < 50 and (downloadCompartment is None or not checkOutLocationCodes(downloadCompartment.codes)):
+		if attempt > 0 and not args.coordinates is None:
+			print("no tiles or insufficient tiles for specified coordinates {:.5f} {:.5f} with output dimensions {}x{} and rotation {}".format(latitude, longitude, targetWidth, targetHeight, rotation))
+			exit()
 		# rotate to get pre-rotated target dimensions
 		if not args.rotation is None:
 			rotation = args.rotation
@@ -662,19 +668,19 @@ while downloadCropAttempt < 20 and (arr is None or wbd_arr is None or allFlat(ar
 			latitude, longitude = args.coordinates[0], args.coordinates[1]
 		else:
 			latitude, longitude = uniformlyRandomLatLon()
-		downloadContainer = Container(latitude, longitude, rotatedWidth, rotatedHeight)
+		downloadCompartment = Compartment(latitude, longitude, rotatedWidth, rotatedHeight)
 		attempt += 1
 	print("\n-c {:.5f} {:.5f} -r {}".format(latitude, longitude, rotation))
-	downloadContainer.report()
+	downloadCompartment.report()
 	if args.previous:
 		# use previously downloaded cropped images
 		arr = np.array(Image.open(storageDir + '/elevation-cropped.tif'))
 		wbd_arr = np.array(Image.open(storageDir + '/waterbody-cropped.tif'))
 	else:
 		# download and arrange tiles into images
-		downloadContainer.downloadAndCrop(username, password)
-		arr = downloadContainer.layers.get('elevation')
-		wbd_arr = downloadContainer.layers.get('waterbody')
+		downloadCompartment.downloadAndCrop(username, password)
+		arr = downloadCompartment.layers.get('elevation')
+		wbd_arr = downloadCompartment.layers.get('waterbody')
 	downloadCropAttempt += 1
 
 Image.fromarray(arr).save(storageDir + '/elevation-cropped.tif')
@@ -713,7 +719,7 @@ print("rotated", arr.shape, arr.min(), arr.max())
 
 if not args.no_shade:
 	# process elevation map for hillshading
-	arrForShade = arr / downloadContainer.metersPerPixelAfterResize # so that the height map's vertical units are the same as its horizontal units
+	arrForShade = arr / downloadCompartment.metersPerPixelAfterResize # so that the height map's vertical units are the same as its horizontal units
 	print("for shade", arrForShade.min(), arrForShade.max())
 	
 	# create hillshade
