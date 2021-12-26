@@ -26,7 +26,13 @@ storageDir = os.path.expanduser('~/a_sort_of_soup')
 CurrentGrade = None
 StatusPrintLock = False
 
+piPer180 = math.pi / 180
 degreesPerTheta = 90 / (math.pi / 2)
+
+equatorRadius = 6378137
+poleRadius = 6356752
+equatorRadiusSq = equatorRadius ** 2
+poleRadiusSq = poleRadius ** 2
 
 def parseLocationCode(locationCode):
 	NS = locationCode[0]
@@ -56,14 +62,20 @@ def uniformlyRandomLatLon():
 	lon = random.randint(-18000000, 18000000) / 100000
 	return lat, lon
 
+def earthRadiusInMetersAtLatitude(latitude):
+	# https://rechneronline.de/earth-radius/
+	# R = √ [ (r1² * cos(B))² + (r2² * sin(B))² ] / [ (r1 * cos(B))² + (r2 * sin(B))² ]
+	latRad = latitude * piPer180
+	return math.sqrt(  ( ((equatorRadiusSq * math.cos(latRad)) ** 2) + ((poleRadiusSq * math.sin(latRad)) ** 2) ) / ( ((equatorRadius * math.cos(latRad)) ** 2) + ((poleRadius * math.sin(latRad)) ** 2) )  )
+
 def measureLatLonInMeters(lat1, lon1, lat2, lon2):
-	R = 6378.137 # Radius of earth in KM
-	dLat = lat2 * math.pi / 180 - lat1 * math.pi / 180
-	dLon = lon2 * math.pi / 180 - lon1 * math.pi / 180
-	a = math.sin(dLat/2) * math.sin(dLat/2) + math.cos(lat1 * math.pi / 180) * math.cos(lat2 * math.pi / 180) * math.sin(dLon/2) * math.sin(dLon/2)
+	R = earthRadiusInMetersAtLatitude((lat1 + lat2) / 2)
+	dLat = (lat2 * piPer180) - (lat1 * piPer180)
+	dLon = (lon2 * piPer180) - (lon1 * piPer180)
+	a = math.sin(dLat/2) * math.sin(dLat/2) + math.cos(lat1 * piPer180) * math.cos(lat2 * piPer180) * math.sin(dLon/2) * math.sin(dLon/2)
 	c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
 	d = R * c
-	return d * 1000
+	return d
 
 def xyMultAtLatLon(latitude, longitude, size=1):
 	halfSize = size / 2
@@ -631,8 +643,7 @@ while downloadCropAttempt < 20 and (arr is None or wbd_arr is None or allFlat(ar
 			latitude, longitude = uniformlyRandomLatLon()
 		downloadContainer = Container(latitude, longitude, rotatedWidth, rotatedHeight)
 		attempt += 1
-	print(latitude, longitude)
-	print("rotation:", rotation, rotatedWidth, rotatedHeight)
+	print("{:.5f} {:.5f} -r {}".format(latitude, longitude, rotation))
 	downloadContainer.report()
 	if args.previous:
 		# use previously downloaded cropped images
@@ -679,11 +690,11 @@ if rotation > 0:
 		wbd_arr = np.rot90(wbd_arr, k=rotation)
 print("rotated", arr.shape, arr.min(), arr.max())
 
-# process elevation map for hillshading
-arrForShade = arr / downloadContainer.metersPerPixelAfterResize # so that the height map's vertical units are the same as its horizontal units
-print("for shade", arrForShade.min(), arrForShade.max())
-
 if not args.no_shade:
+	# process elevation map for hillshading
+	arrForShade = arr / downloadContainer.metersPerPixelAfterResize # so that the height map's vertical units are the same as its horizontal units
+	print("for shade", arrForShade.min(), arrForShade.max())
+	
 	# create hillshade
 	shades = [
 		[350, 70, 0.9],
