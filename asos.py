@@ -16,7 +16,6 @@ from cv2 import resize, INTER_LINEAR
 from bs4 import BeautifulSoup
 import concurrent.futures
 from screeninfo import get_monitors
-import datetime
 
 # local modules
 import catacomb
@@ -257,16 +256,6 @@ def autocontrastedUint16(arr):
 
 def autocontrastedSingle(arr):
 	return (autocontrast(arr, 2) - 1).astype(np.single)
-
-def decontrast(arr, minValue, maxValue):
-	mult = (maxValue - minValue) / (arr.max() - arr.min())
-	return minValue + (arr * mult)
-
-def skewMedianToCenter(arr):
-	center = (arr.min() + arr.max()) / 2
-	med = np.median(arr)
-	mult = (med / center)
-	return arr * (abs(arr / med) * mult)
 
 def getEOSDISlogin():
 	if args.one_time_login:
@@ -737,9 +726,9 @@ if not args.no_shade:
 	
 	# create hillshade
 	shades = [
-		[350, 70, 0.9],
-		[15, 60, 0.7],
-		[270, 55, 1]
+		[350, 70, 0.9], # [350, 70, 0.9],
+		[15, 53, 0.7], #  [15, 60, 0.7],
+		[270, 45, 1] #    [270, 55, 1]
 	]
 	slopeForShade, aspectForShade = hillshadePreparations(arrForShade)
 	hsSum = None
@@ -750,7 +739,7 @@ if not args.no_shade:
 			hsSum = hs
 		else:
 			hsSum += hs
-	hs = (0.9 * autocontrast(hsSum, 255)) + (0.1 * image_histogram_equalization(hsSum, 256))
+	hs = autocontrast(hsSum, 255)
 	# print(hs.min(), np.median(hs), hs.max())
 	hs = hs + (127 - np.median(hs)) # linearly center median
 	# print(np.count_nonzero(hs < 0), "pixels below 0")
