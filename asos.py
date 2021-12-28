@@ -12,7 +12,7 @@ from io import BytesIO
 import random
 import sys
 import json
-from cv2 import resize, INTER_LINEAR
+from cv2 import resize, INTER_LINEAR, INTER_NEAREST, GaussianBlur, BORDER_DEFAULT
 from bs4 import BeautifulSoup
 import concurrent.futures
 from screeninfo import get_monitors
@@ -705,19 +705,19 @@ if 0 in arr and arr.min() < 0:
 # restrict waterbody image to only those areas with 0 slope, so it doesn't cut off the hillshade
 if not wbd_arr is None:
 	slope = slopeOfArray(arr)
-	wbd_arr = (slope < 0.8) & (wbd_arr > wbd_arr.min())
-	wbd_arr = autocontrastedUint8(wbd_arr.astype(np.uint8))
+	wbd_arr = (slope < 0.8) & (wbd_arr > wbd_arr.min()).astype(np.uint8)
 
-# stretch and rotate elevation data
+# stretch and rotate elevation data and waterbody data
 arr = resize(arr, dsize=(rotatedWidth, rotatedHeight), interpolation=INTER_LINEAR)
 if not wbd_arr is None:
-	wbd_arr = resize(wbd_arr, dsize=(rotatedWidth, rotatedHeight), interpolation=INTER_LINEAR)
+	wbd_arr = resize(autocontrastedUint8(wbd_arr), dsize=(rotatedWidth, rotatedHeight), interpolation=INTER_LINEAR)
 print("resized", arr.shape, arr.min(), arr.max())
 if rotation > 0:
 	arr = np.rot90(arr, k=rotation)
 	if not wbd_arr is None:
 		wbd_arr = np.rot90(wbd_arr, k=rotation)
 print("rotated", arr.shape, arr.min(), arr.max())
+# Image.fromarray(wbd_arr).save(storageDir + '/wbd_resized_rotated.tif')
 
 if not args.no_shade:
 	# process elevation map for hillshading
@@ -728,7 +728,7 @@ if not args.no_shade:
 	shades = [
 		[350, 70, 0.9], # [350, 70, 0.9],
 		[15, 57, 0.7], #  [15, 60, 0.7],
-		[270, 50, 1] #    [270, 55, 1]
+		[270, 50, 1], #    [270, 55, 1]
 	]
 	slopeForShade, aspectForShade = hillshadePreparations(arrForShade)
 	hsSum = None
@@ -831,17 +831,14 @@ for col in allSteps:
 	sIndex += 1
 i = highChromaSteps[0].interpolate(highChromaSteps[1:], space='lch-d65')
 
-# convert elevation data to 256-color grayscale image
-# equalize data with a wide range
+# half-equalize elevation data with a wide range
 if arr.max() - arr.min() > 100:
-	arr_eq = (0.5 * image_histogram_equalization(arr, 256)) + (0.5 * autocontrast(arr, 255))
+	arr_eq = (0.5 * image_histogram_equalization(arr, 1024)) + (0.5 * autocontrast(arr, 1023))
 else:
 	arr_eq = arr
 
-
-
 # colorize elevation data
-color_arr = arrayColorizeWithInterpolation(arr, i, 1024)
+color_arr = arrayColorizeWithInterpolation(arr_eq, i, 1024)
 color_el_img = Image.fromarray(color_arr)
 
 # colorize water bodies
@@ -854,8 +851,10 @@ if not wbd_arr is None:
 	print('water color:', waterColor.convert('lch-d65'))
 	# colorize waterbody image
 	waterInterpol = coloraide.Color('srgb', [waterColor.r, waterColor.g, waterColor.b], 0).interpolate(waterColor)
-	wbd_arr_color = arrayColorizeWithInterpolation(wbd_arr, waterInterpol, 2, True)
-	color_wbd_img = Image.fromarray(wbd_arr_color).filter(ImageFilter.GaussianBlur(radius=0.75))
+	wbd_arr = GaussianBlur(wbd_arr, (3,3), 0.5, 0.5, BORDER_DEFAULT)
+	# Image.fromarray(wbd_arr).save(storageDir + '/wbd_blurred.tif')
+	wbd_arr_color = arrayColorizeWithInterpolation(wbd_arr, waterInterpol, None, True)
+	color_wbd_img = Image.fromarray(wbd_arr_color)
 
 if args.no_shade:
 	blended_img = color_el_img.convert('RGBA')
