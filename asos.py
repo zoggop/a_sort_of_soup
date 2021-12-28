@@ -164,7 +164,7 @@ def nextHueByDeltaE(hues, targetDeltaE):
 			fallbackHue = newHue
 	# print("fallback", fallbackDeltaE)
 	return fallbackHue
-	
+
 def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha=False):
 	if numColors is None:
 		if greyArr.dtype == np.uint8:
@@ -172,7 +172,7 @@ def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha
 		elif greyArr.dtype == np.uint16:
 			numColors = 65536
 		else:
-			print("input grey array for colorization is not uint8 or uint16")
+			print("input grey array for colorization is not uint8 or uint16, and numColors not specified")
 			return
 	else:
 		greyArr = autocontrast(greyArr, numColors - 1)
@@ -864,7 +864,7 @@ if not wbd_arr is None:
 	waterColor = highestChromaColor(darkMidLight[wABC], random.choice(wHues), args.maxchroma)
 	print('water color:', waterColor.convert('lch-d65'))
 	# colorize waterbody image
-	waterInterpol = coloraide.Color('srgb', [0, 0, 0], 0).interpolate(waterColor)
+	waterInterpol = coloraide.Color('srgb', [waterColor.r, waterColor.g, waterColor.b], 0).interpolate(waterColor)
 	wbd_arr_color = arrayColorizeWithInterpolation(wbd_arr, waterInterpol, 2, True)
 	color_wbd_img = Image.fromarray(wbd_arr_color).filter(ImageFilter.GaussianBlur(radius=0.75))
 
