@@ -16,6 +16,7 @@ from cv2 import resize, INTER_LINEAR
 from bs4 import BeautifulSoup
 import concurrent.futures
 from screeninfo import get_monitors
+import datetime
 
 # local modules
 import catacomb
@@ -23,7 +24,6 @@ from perceptual_hues_lavg import perceptualHues
 
 storageDir = os.path.expanduser('~/a_sort_of_soup')
 
-CurrentGrade = None
 StatusPrintLock = False
 
 piPer180 = math.pi / 180
@@ -164,33 +164,46 @@ def nextHueByDeltaE(hues, targetDeltaE):
 			fallbackHue = newHue
 	# print("fallback", fallbackDeltaE)
 	return fallbackHue
-
-def gradeFunc(v):
-	return CurrentGrade[v]
-
-def colorizeWithInterpolation(bwImage, interpolation, alpha=False):
-	global CurrentGrade
-	if bwImage.mode == 'L':
-		bits = 8
-	elif bwImage.mode == 'I':
-		bits = 16
-	numColors = 2 ** bits
+	
+def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha=False):
+	if numColors is None:
+		if greyArr.dtype == np.uint8:
+			numColors = 256
+		elif greyArr.dtype == np.uint16:
+			numColors = 65536
+		else:
+			print("input grey array for colorization is not uint8 or uint16")
+			return
+	else:
+		greyArr = autocontrast(greyArr, numColors - 1)
+		if numColors <= 256:
+			greyArr = greyArr.astype(np.uint8)
+		else:
+			greyArr = greyArr.astype(np.uint16)
 	divisor = numColors - 1
-	redGrade = [int(interpolation(l/divisor).red * 255) for l in range(numColors)]
-	greenGrade = [int(interpolation(l/divisor).green * 255) for l in range(numColors)]
-	blueGrade = [int(interpolation(l/divisor).blue * 255) for l in range(numColors)]
-	CurrentGrade = redGrade
-	redImage = Image.eval(bwImage, gradeFunc)
-	CurrentGrade = greenGrade
-	greenImage = Image.eval(bwImage, gradeFunc)
-	CurrentGrade = blueGrade
-	blueImage = Image.eval(bwImage, gradeFunc)
+	channels = ['red', 'green', 'blue']
 	if alpha:
-		alphaGrade = [int(interpolation(l/divisor).alpha * 255) for l in range(numColors)]
-		CurrentGrade = alphaGrade
-		alphaImage = Image.eval(bwImage, gradeFunc)
-		return Image.merge('RGBA', (redImage, greenImage, blueImage, alphaImage))
-	return Image.merge('RGB', (redImage, greenImage, blueImage))
+		channels.append('alpha')
+	numChannels = len(channels)
+	lookupColor = np.zeros((numColors, numChannels), dtype=np.uint8)
+	if numColors <= 256:
+		for l in range(0, numColors):
+			n = l / divisor
+			lookupColor[l] = [int(getattr(interpolation(n), channels[ci]) * 255) for ci in range(numChannels)]
+			# lookupRGB[l] = [int(interpolation(n).red * 255), int(interpolation(n).green * 255), int(interpolation(n).blue * 255)]
+	else:
+		for l in range(0, numColors):
+			n = l / divisor
+			color = [getattr(interpolation(n), channels[ci]) * 255 for ci in range(numChannels)]
+			for ci in range(numChannels):
+				if bool(random.getrandbits(1)) == True:
+					color[ci] = max(0, min(255, math.ceil(color[ci])))
+				else:
+					color[ci] = max(0, min(255, math.floor(color[ci])))
+			lookupColor[l] = color
+	colorArr = np.zeros((*greyArr.shape, numChannels), dtype=np.uint8)
+	np.take(lookupColor, greyArr, axis=0, out=colorArr)
+	return colorArr
 
 def image_histogram_equalization(image, number_bins=65536):
 	# from http://www.janeriksolem.net/histogram-equalization-with-python-and.html
@@ -835,10 +848,12 @@ if arr.max() - arr.min() > 100:
 	arr_eq = (0.5 * image_histogram_equalization(arr, 256)) + (0.5 * autocontrast(arr, 255))
 else:
 	arr_eq = arr
-el_img = Image.fromarray(autocontrastedUint8(arr_eq))
+
+
 
 # colorize elevation data
-color_el_img = colorizeWithInterpolation(el_img, i)
+color_arr = arrayColorizeWithInterpolation(arr, i, 1024)
+color_el_img = Image.fromarray(color_arr)
 
 # colorize water bodies
 if not wbd_arr is None:
@@ -850,8 +865,8 @@ if not wbd_arr is None:
 	print('water color:', waterColor.convert('lch-d65'))
 	# colorize waterbody image
 	waterInterpol = coloraide.Color('srgb', [0, 0, 0], 0).interpolate(waterColor)
-	wbd_img = Image.fromarray(wbd_arr).filter(ImageFilter.GaussianBlur(radius=0.67))
-	color_wbd_img = colorizeWithInterpolation(wbd_img, waterInterpol, True)
+	wbd_arr_color = arrayColorizeWithInterpolation(wbd_arr, waterInterpol, 2, True)
+	color_wbd_img = Image.fromarray(wbd_arr_color).filter(ImageFilter.GaussianBlur(radius=0.75))
 
 if args.no_shade:
 	blended_img = color_el_img.convert('RGBA')
@@ -870,7 +885,6 @@ else:
 	blended_img = Image.alpha_composite(blended_img, color_wbd_img).convert('RGB')
 
 # save images
-# el_img.save(storageDir + '/el_img.tif')
 if not args.output is None:
 	if os.path.exists(os.path.split(args.output)[0]):
 		ext = os.path.splitext(args.output)[1].lower()
