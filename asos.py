@@ -727,8 +727,8 @@ if not args.no_shade:
 	# create hillshade
 	shades = [
 		[350, 70, 0.9], # [350, 70, 0.9],
-		[15, 53, 0.7], #  [15, 60, 0.7],
-		[270, 45, 1] #    [270, 55, 1]
+		[15, 57, 0.7], #  [15, 60, 0.7],
+		[270, 50, 1] #    [270, 55, 1]
 	]
 	slopeForShade, aspectForShade = hillshadePreparations(arrForShade)
 	hsSum = None
