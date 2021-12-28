@@ -1,18 +1,18 @@
 import os
 import argparse
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image
 import math
 from zipfile import ZipFile
 import coloraide
-from blend_modes import overlay #, multiply, soft_light, hard_light, darken_only
+from blend_modes import overlay
 from getpass import getpass
 import requests
 from io import BytesIO
 import random
 import sys
 import json
-from cv2 import resize, INTER_LINEAR, INTER_NEAREST, GaussianBlur, BORDER_DEFAULT
+from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT
 from bs4 import BeautifulSoup
 import concurrent.futures
 from screeninfo import get_monitors
