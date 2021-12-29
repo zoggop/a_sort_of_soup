@@ -573,6 +573,255 @@ def fractionAboveLevel(arr, level=None):
 	print(fraction, "above", level)
 	return fraction
 
+def pickHues(hueDeltaE):
+	print("hue Delta-E:", hueDeltaE)
+	ah, bh, ch = None, None, None
+	if not args.hues is None:
+		if args.hues[0] > -1:
+			ah = args.hues[0]
+		if len(args.hues) > 1 and args.hues[1] > -1:
+			bh = args.hues[1]
+		if len(args.hues) > 2 and args.hues[2] > -1:
+			ch = args.hues[2]
+	if ah is None:
+		if bh is None and ch is None:
+			ah = perceptuallyUniformRandomHue()
+		elif bh is None:
+			ah = nextHueByDeltaE([ch], hueDeltaE)
+		elif ch is None:
+			ah = nextHueByDeltaE([bh], hueDeltaE)
+		else:
+			ah = nextHueByDeltaE([bh,ch], hueDeltaE)
+	if bh is None:
+		if ch is None:
+			bh = nextHueByDeltaE([ah], hueDeltaE)
+		else:
+			bh = nextHueByDeltaE([ah,ch], hueDeltaE)
+	if ch is None:
+		ch = nextHueByDeltaE([ah,bh], hueDeltaE)
+	print('hues:', ah, bh, ch)
+	return ah, bh, ch
+
+def pickLightnesses():
+	darkMidLight = [random.randint(5,30), random.randint(35, 65), random.randint(70,97)]
+	lOrders = [
+		[0, 1, 2],
+		[2, 0, 1],
+		[1, 0, 2],
+		[0, 2, 1]]
+	lOrder = random.choice(lOrders)
+	if not args.lightnesses is None:
+		if len(args.lightnesses) == 1:
+			lOrder = random.choice([lOrders[0], lOrders[3]])
+		if len(args.lightnesses) == 2:
+			lOrder = lOrders[0]
+	ls = [darkMidLight[lOrder[0]], darkMidLight[lOrder[1]], darkMidLight[lOrder[2]]]
+	if not args.lightnesses is None:
+		if len(args.lightnesses) == 1:
+			ls = [args.lightnesses[0], ls[1], ls[2]]
+		elif len(args.lightnesses) == 2:
+			ls = [args.lightnesses[0], args.lightnesses[1], ls[2]]
+		elif len(args.lightnesses) == 3:
+			ls = args.lightnesses
+	print('lightnesses:', *ls)
+	return ls
+
+def pickChromas():
+	chromas = []
+	for cIndex in range(0, 3):
+		if not args.chromas is None and len(args.chromas) > cIndex and args.chromas[cIndex] > -1:
+			chromas.append(args.chromas[cIndex])
+		else:
+			chromas.append((random.randint(0,1) == 1 and random.randint(0, args.maxchroma)) or args.maxchroma)
+	print('chromas:', chromas)
+	return chromas
+
+def pickWaterColor(landColors):
+	# pick a water color
+	wABC = random.randrange(0,len(landColors))
+	wHues = [c.convert('lch-d65').h for c in landColors]
+	wHues.pop(wABC)
+	waterColor = highestChromaColor(landColors[wABC].convert('lch-d65').l, random.choice(wHues), args.maxchroma)
+	print('water color:', waterColor.convert('lch-d65'))
+	return waterColor
+
+def highChromaGradient(lightnesses, chromas, hues):
+	a = highestChromaColor(lightnesses[0], hues[0], chromas[0])
+	b = highestChromaColor(lightnesses[1], hues[1], chromas[1])
+	c = highestChromaColor(lightnesses[2], hues[2], chromas[2])
+	allSteps = a.steps([b, c], steps=256, space='lch-d65')
+	highChromaSteps = []
+	sIndex = 0
+	for col in allSteps:
+		lch = col.convert('lch-d65')
+		if sIndex > 127:
+			mult = (sIndex - 127) / 128
+			chroma = ((1-mult) * chromas[1]) + (mult * chromas[2])
+		else:
+			mult = sIndex / 127
+			chroma = ((1-mult) * chromas[0]) + (mult * chromas[1])
+		highChromaSteps.append(highestChromaColor(lch.l, lch.h, chroma))
+		# print(sIndex, highChromaSteps[-1].convert('lch-d65').c)
+		sIndex += 1
+	return highChromaSteps[0].interpolate(highChromaSteps[1:], space='lch-d65'), a, b, c
+
+class TerrainCrop:
+
+	shaded_color_elev = None
+	color_map_with_waterbody = None
+
+	def __init__(self, elevation, waterbody, preRotatedWidth, preRotatedHeight, rotation, metersPerPixelAfterResize):
+		self.elevation = elevation.astype(np.single)
+		if waterbody is None or args.no_water or allFlat(waterbody):
+			self.waterbody = None
+		else:
+			self.waterbody = waterbody
+		self.preRotatedWidth, self.preRotatedHeight = preRotatedWidth, preRotatedHeight
+		self.rotation = rotation
+		self.metersPerPixelAfterResize = metersPerPixelAfterResize
+
+	def clipToSeaLevel(self):
+		# clip negative bits if this crop contains sea level
+		if 0 in self.elevation and self.elevation.min() < 0:
+			self.elevation = np.clip(self.elevation, 0, None)
+			print("clipped to sea level", self.elevation.min(), self.elevation.max())
+
+	def constrainWaterbodyToLowSlope(self):
+		# restrict waterbody image to only those areas with 0 slope, so it doesn't cut off the hillshade
+		if self.waterbody is None:
+			return
+		slope = slopeOfArray(self.elevation)
+		self.waterbody = (slope < 0.8) & (self.waterbody > self.waterbody.min()).astype(np.uint8)
+
+	def stretch(self):
+		# stretch elevation and waterbody data
+		self.elevation = resize(self.elevation, dsize=(self.preRotatedWidth, self.preRotatedHeight), interpolation=INTER_LINEAR)
+		print("resized", self.elevation.shape, arr.min(), arr.max())
+		if self.waterbody is None:
+			return
+		self.waterbody = resize(autocontrastedUint8(self.waterbody), dsize=(self.preRotatedWidth, self.preRotatedHeight), interpolation=INTER_LINEAR)
+
+	def rotate(self):
+		# rotate elevation and waterbody data
+		if self.rotation == 0:
+			return
+		self.elevation = np.rot90(self.elevation, k=rotation)
+		if not self.waterbody is None:
+			self.waterbody = np.rot90(self.waterbody, k=rotation)
+		print("rotated", self.elevation.shape, arr.min(), arr.max())
+
+	def shade(self):
+		if args.no_shade:
+			return
+		# process elevation map for hillshading
+		elevForShade = self.elevation / self.metersPerPixelAfterResize # so that the height map's vertical units are the same as its horizontal units
+		print("for shade", elevForShade.min(), elevForShade.max())
+		# create hillshade
+		shades = [
+			[350, 70, 0.9], # [350, 70, 0.9],
+			[15, 57, 0.7], #  [15, 60, 0.7],
+			[270, 50, 1], #    [270, 55, 1]
+		]
+		slopeForShade, aspectForShade = hillshadePreparations(elevForShade)
+		hsSum = None
+		for shade in shades:
+			hs = hillshade(elevForShade, shade[0], shade[1], slopeForShade, aspectForShade) * shade[2]
+			# Image.fromarray(hs.astype(np.uint8)).save(storageDir + '/hs-{}-{}-{}.tif'.format(*shade))
+			if hsSum is None:
+				hsSum = hs
+			else:
+				hsSum += hs
+		hs = autocontrast(hsSum, 255)
+		hs = hs + (127 - np.median(hs)) # linearly center median
+		if hs.min() < 0:
+			# compress negative values
+			widthBelow = 127 - hs.min()
+			hs = np.where(hs < 128, hs - (hs.min() * ((widthBelow - (hs - hs.min())) / widthBelow)), hs)
+		self.hillshade = hs.astype(np.uint8)
+
+	def colorizeElevation(self, interpolation):
+		# half-equalize elevation data with a wide range
+		if self.elevation.max() - self.elevation.min() > 100:
+			elevForColor = (0.5 * image_histogram_equalization(self.elevation, 1024)) + (0.5 * autocontrast(self.elevation, 1023))
+		else:
+			elevForColor = self.elevation
+		# colorize elevation data
+		self.color_elev = arrayColorizeWithInterpolation(elevForColor, interpolation, 1024)
+
+	def overlayShade(self):
+		# blend colorized elevation with hillshade using overlay
+		if args.no_shade or self.hillshade is None:
+			return
+		hs_arr = np.array(Image.fromarray(self.hillshade).convert('RGBA')).astype(float)
+		color_el_arr = np.array(Image.fromarray(self.color_elev).convert('RGBA')).astype(float)
+		self.shaded_color_elev = np.array(Image.fromarray(overlay(color_el_arr, hs_arr, 1).astype(np.uint8)).convert('RGB'))
+
+	def superimposeWaterbody(self, waterColor):
+		if args.no_water or self.waterbody is None:
+			return
+		bottomLayer = self.shaded_color_elev
+		if bottomLayer is None:
+			bottomLayer = self.color_elev
+		wbd_blur = GaussianBlur(self.waterbody, (3,3), 0.5, 0.5, BORDER_DEFAULT)
+		wbd_float = wbd_blur / 255
+		wbd_alpha = np.stack((wbd_float, wbd_float, wbd_float), axis=2)
+		wbd_one_color = np.zeros(bottomLayer.shape, dtype=np.uint8)
+		wbd_one_color[:] = (int(waterColor.r * 255), int(waterColor.g * 255), int(waterColor.b * 255))
+		self.color_map_with_waterbody = ( (wbd_one_color * wbd_alpha) + (bottomLayer * (1 - wbd_alpha)) ).astype(np.uint8)
+		if args.output is None:
+			# create an RGBA image of the color waterbody data to save
+			self.rgba_waterbody = np.zeros((*wbd_float.shape, 4), dtype=np.uint8)
+			wbd_r, wbd_g, wbd_b = np.zeros(wbd_float.shape, dtype=np.uint8), np.zeros(wbd_float.shape, dtype=np.uint8), np.zeros(wbd_float.shape, dtype=np.uint8)
+			wbd_r[:] = int(waterColor.r * 255)
+			wbd_g[:] = int(waterColor.g * 255)
+			wbd_b[:] = int(waterColor.b * 255)
+			self.rgba_waterbody = np.stack((wbd_r, wbd_g, wbd_b, wbd_blur), axis=2)
+
+	def saveImages(self):
+		final_arr = self.color_map_with_waterbody
+		if final_arr is None:
+			final_arr = self.shaded_color_elev
+		if final_arr is None:
+			final_arr = self.color_elev
+		final_img = Image.fromarray(final_arr)
+		if not args.output is None:
+			if os.path.exists(os.path.split(args.output)[0]):
+				ext = os.path.splitext(args.output)[1].lower()
+				if ext == '':
+					final_img.save(args.output, format='PNG')
+				elif ext == '.jpg' or ext == '.jpeg':
+					final_img.save(args.output, quality=95)
+				else:
+					final_img.save(args.output)
+				print('saved', args.output)
+		else:
+			if not args.no_shade:
+				Image.fromarray(self.hillshade).save(storageDir + '/hillshade.tif')
+				print('saved', storageDir + '/hillshade.tif')
+			if not args.no_water:
+				Image.fromarray(self.rgba_waterbody).save(storageDir + '/water.tif')
+				print('saved', storageDir + '/water.tif')
+			Image.fromarray(self.color_elev).save(storageDir + '/elevation_gradient.tif')
+			print('saved', storageDir + '/elevation_gradient.tif')
+			final_img.save(storageDir + '/output.png')
+			print('saved', storageDir + '/output.png')
+
+	def processData(self):
+		self.clipToSeaLevel()
+		self.constrainWaterbodyToLowSlope()
+		self.stretch()
+		self.rotate()
+		lightnesses = pickLightnesses()
+		chromas = pickChromas()
+		hues = pickHues(args.hue_delta)
+		interpolation, a, b, c = highChromaGradient(lightnesses, chromas, hues)
+		self.colorizeElevation(interpolation)
+		self.shade()
+		self.overlayShade()
+		if not args.no_water:
+			waterColor = pickWaterColor([a, b, c])
+			self.superimposeWaterbody(waterColor)
+
 def checkOutLocationCodes(codes):
 	codesHaveSRTM, codesHaveASTER = False, False
 	for code in codes:
@@ -662,15 +911,15 @@ while downloadCropAttempt < 20 and (arr is None or wbd_arr is None or allFlat(ar
 		else:
 			rotation = random.randint(0, 3)
 		if rotation == 1 or rotation == 3:
-			rotatedWidth, rotatedHeight = targetHeight, targetWidth
+			preRotatedWidth, preRotatedHeight = targetHeight, targetWidth
 		else:
-			rotatedWidth, rotatedHeight = targetWidth, targetHeight
+			preRotatedWidth, preRotatedHeight = targetWidth, targetHeight
 		# pick a random location or use specified coordinates
 		if not args.coordinates is None and attempt == 0 and downloadCropAttempt == 0:
 			latitude, longitude = args.coordinates[0], args.coordinates[1]
 		else:
 			latitude, longitude = uniformlyRandomLatLon()
-		downloadCompartment = Compartment(latitude, longitude, rotatedWidth, rotatedHeight)
+		downloadCompartment = Compartment(latitude, longitude, preRotatedWidth, preRotatedHeight)
 		attempt += 1
 	print("\n-c {:.5f} {:.5f} -r {}".format(latitude, longitude, rotation))
 	downloadCompartment.report()
@@ -685,212 +934,13 @@ while downloadCropAttempt < 20 and (arr is None or wbd_arr is None or allFlat(ar
 		wbd_arr = downloadCompartment.layers.get('waterbody')
 	downloadCropAttempt += 1
 
-Image.fromarray(arr).save(storageDir + '/elevation-cropped.tif')
-Image.fromarray(wbd_arr).save(storageDir + '/waterbody-cropped.tif')
-if args.no_water or allFlat(wbd_arr):
-	# ignore waterbody maps if not being drawn or with no data
-	wbd_arr = None
+if not args.previous:
+	Image.fromarray(arr).save(storageDir + '/elevation-cropped.tif')
+	Image.fromarray(wbd_arr).save(storageDir + '/waterbody-cropped.tif')
 
-arr = arr.astype(np.single)
-# print("astype", arr.shape, arr.min(), arr.max())
-
-# Image.fromarray(autocontrastedUint8(arr)).save(storageDir + '/el-cropped.tif')
-
-# clip negative bits if this crop contains sea level
-if 0 in arr and arr.min() < 0:
-	arr = np.clip(arr, 0, None)
-	# print(np.count_nonzero(arr<0))
-	print("clipped to ocean", arr.min(), arr.max())
-
-# restrict waterbody image to only those areas with 0 slope, so it doesn't cut off the hillshade
-if not wbd_arr is None:
-	slope = slopeOfArray(arr)
-	wbd_arr = (slope < 0.8) & (wbd_arr > wbd_arr.min()).astype(np.uint8)
-
-# stretch and rotate elevation data and waterbody data
-arr = resize(arr, dsize=(rotatedWidth, rotatedHeight), interpolation=INTER_LINEAR)
-if not wbd_arr is None:
-	wbd_arr = resize(autocontrastedUint8(wbd_arr), dsize=(rotatedWidth, rotatedHeight), interpolation=INTER_LINEAR)
-print("resized", arr.shape, arr.min(), arr.max())
-if rotation > 0:
-	arr = np.rot90(arr, k=rotation)
-	if not wbd_arr is None:
-		wbd_arr = np.rot90(wbd_arr, k=rotation)
-print("rotated", arr.shape, arr.min(), arr.max())
-# Image.fromarray(wbd_arr).save(storageDir + '/wbd_resized_rotated.tif')
-
-if not args.no_shade:
-	# process elevation map for hillshading
-	arrForShade = arr / downloadCompartment.metersPerPixelAfterResize # so that the height map's vertical units are the same as its horizontal units
-	print("for shade", arrForShade.min(), arrForShade.max())
-	
-	# create hillshade
-	shades = [
-		[350, 70, 0.9], # [350, 70, 0.9],
-		[15, 57, 0.7], #  [15, 60, 0.7],
-		[270, 50, 1], #    [270, 55, 1]
-	]
-	slopeForShade, aspectForShade = hillshadePreparations(arrForShade)
-	hsSum = None
-	for shade in shades:
-		hs = hillshade(arrForShade, shade[0], shade[1], slopeForShade, aspectForShade) * shade[2]
-		# Image.fromarray(hs.astype(np.uint8)).save(storageDir + '/hs-{}-{}-{}.tif'.format(*shade))
-		if hsSum is None:
-			hsSum = hs
-		else:
-			hsSum += hs
-	hs = autocontrast(hsSum, 255)
-	# print(hs.min(), np.median(hs), hs.max())
-	hs = hs + (127 - np.median(hs)) # linearly center median
-	# print(np.count_nonzero(hs < 0), "pixels below 0")
-	if hs.min() < 0:
-		# compress negative values
-		widthBelow = 127 - hs.min()
-		hs = np.where(hs < 128, hs - (hs.min() * ((widthBelow - (hs - hs.min())) / widthBelow)), hs)
-	# print(np.count_nonzero(hs == 0), "pixels at 0")
-	# print(hs.min(), np.median(hs), hs.max())
-	hs_img = Image.fromarray(hs.astype(np.uint8))
-
-# pick hues
-print("hue Delta-E:", args.hue_delta)
-ah, bh, ch = None, None, None
-if not args.hues is None:
-	if args.hues[0] > -1:
-		ah = args.hues[0]
-	if len(args.hues) > 1 and args.hues[1] > -1:
-		bh = args.hues[1]
-	if len(args.hues) > 2 and args.hues[2] > -1:
-		ch = args.hues[2]
-if ah is None:
-	if bh is None and ch is None:
-		ah = perceptuallyUniformRandomHue()
-	elif bh is None:
-		ah = nextHueByDeltaE([ch], args.hue_delta)
-	elif ch is None:
-		ah = nextHueByDeltaE([bh], args.hue_delta)
-	else:
-		ah = nextHueByDeltaE([bh,ch], args.hue_delta)
-if bh is None:
-	if ch is None:
-		bh = nextHueByDeltaE([ah], args.hue_delta)
-	else:
-		bh = nextHueByDeltaE([ah,ch], args.hue_delta)
-if ch is None:
-	ch = nextHueByDeltaE([ah,bh], args.hue_delta)
-print('hues:', ah, bh, ch)
-
-# pick lightnesses
-darkMidLight = [random.randint(5,30), random.randint(35, 65), random.randint(70,97)]
-lOrders = [
-	[0, 1, 2],
-	[2, 0, 1],
-	[1, 0, 2],
-	[0, 2, 1]]
-lOrder = random.choice(lOrders)
-if not args.lightnesses is None:
-	if len(args.lightnesses) == 1:
-		lOrder = random.choice([lOrders[0], lOrders[3]])
-	if len(args.lightnesses) == 2:
-		lOrder = lOrders[0]
-ls = [darkMidLight[lOrder[0]], darkMidLight[lOrder[1]], darkMidLight[lOrder[2]]]
-if not args.lightnesses is None:
-	if len(args.lightnesses) == 1:
-		ls = [args.lightnesses[0], ls[1], ls[2]]
-	elif len(args.lightnesses) == 2:
-		ls = [args.lightnesses[0], args.lightnesses[1], ls[2]]
-	elif len(args.lightnesses) == 3:
-		ls = args.lightnesses
-print('lightnesses:', *ls)
-
-# pick chromas
-chromas = []
-for cIndex in range(0, 3):
-	if not args.chromas is None and len(args.chromas) > cIndex and args.chromas[cIndex] > -1:
-		chromas.append(args.chromas[cIndex])
-	else:
-		chromas.append((random.randint(0,1) == 1 and random.randint(0, args.maxchroma)) or args.maxchroma)
-print('chromas:', chromas)
-
-# create gradient
-a = highestChromaColor(ls[0], ah, chromas[0])
-b = highestChromaColor(ls[1], bh, chromas[1])
-c = highestChromaColor(ls[2], ch, chromas[2])
-allSteps = a.steps([b, c], steps=256, space='lch-d65')
-highChromaSteps = []
-sIndex = 0
-for col in allSteps:
-	lch = col.convert('lch-d65')
-	if sIndex > 127:
-		mult = (sIndex - 127) / 128
-		chroma = ((1-mult) * chromas[1]) + (mult * chromas[2])
-	else:
-		mult = sIndex / 127
-		chroma = ((1-mult) * chromas[0]) + (mult * chromas[1])
-	highChromaSteps.append(highestChromaColor(lch.l, lch.h, chroma))
-	# print(sIndex, highChromaSteps[-1].convert('lch-d65').c)
-	sIndex += 1
-i = highChromaSteps[0].interpolate(highChromaSteps[1:], space='lch-d65')
-
-# half-equalize elevation data with a wide range
-if arr.max() - arr.min() > 100:
-	arr_eq = (0.5 * image_histogram_equalization(arr, 1024)) + (0.5 * autocontrast(arr, 1023))
-else:
-	arr_eq = arr
-
-# colorize elevation data
-color_arr = arrayColorizeWithInterpolation(arr_eq, i, 1024)
-color_el_img = Image.fromarray(color_arr)
-
-# colorize water bodies
-if not wbd_arr is None:
-	# pick a water color
-	wABC = random.randint(0,2)
-	wHues = [ah, bh, ch]
-	wHues.pop(wABC)
-	waterColor = highestChromaColor(darkMidLight[wABC], random.choice(wHues), args.maxchroma)
-	print('water color:', waterColor.convert('lch-d65'))
-	# colorize waterbody image
-	waterInterpol = coloraide.Color('srgb', [waterColor.r, waterColor.g, waterColor.b], 0).interpolate(waterColor)
-	wbd_arr = GaussianBlur(wbd_arr, (3,3), 0.5, 0.5, BORDER_DEFAULT)
-	# Image.fromarray(wbd_arr).save(storageDir + '/wbd_blurred.tif')
-	wbd_arr_color = arrayColorizeWithInterpolation(wbd_arr, waterInterpol, None, True)
-	color_wbd_img = Image.fromarray(wbd_arr_color)
-
-if args.no_shade:
-	blended_img = color_el_img.convert('RGBA')
-else:
-	# blend colorized elevation with hillshade
-	color_el_arr = np.array(color_el_img.convert('RGBA'))
-	hs_arr = np.array(hs_img.convert('RGBA'))
-	blended_float = overlay(color_el_arr.astype(float), hs_arr.astype(float), 1)
-	# blended_float = overlay(hs_arr.astype(float), color_el_arr.astype(float), 1)
-	blended_arr = np.uint8(blended_float)
-	blended_img = Image.fromarray(blended_arr)
-
-if wbd_arr is None:
-	blended_img = blended_img.convert('RGB')
-else:
-	blended_img = Image.alpha_composite(blended_img, color_wbd_img).convert('RGB')
-
-# save images
-if not args.output is None:
-	if os.path.exists(os.path.split(args.output)[0]):
-		ext = os.path.splitext(args.output)[1].lower()
-		if ext == '':
-			blended_img.save(args.output, format='PNG')
-		elif ext == '.jpg' or ext == '.jpeg':
-			blended_img.save(args.output, quality=95)
-		else:
-			blended_img.save(args.output)
-else:
-	if not args.no_shade:
-		hs_img.save(storageDir + '/hillshade.tif')
-	if not wbd_arr is None:
-		color_wbd_img.save(storageDir + '/water.tif')
-	color_el_img.save(storageDir + '/elevation_gradient.tif')
-	blended_img.save(storageDir + '/output.png')
-
-print("saved image(s)")
+thisCrop = TerrainCrop(arr, wbd_arr, preRotatedWidth, preRotatedHeight, rotation, downloadCompartment.metersPerPixelAfterResize)
+thisCrop.processData()
+thisCrop.saveImages()
 
 if not args.previous:
 	# save previous info
