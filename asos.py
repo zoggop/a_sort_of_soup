@@ -669,6 +669,7 @@ class TerrainCrop:
 
 	shaded_color_elev = None
 	color_map_with_waterbody = None
+	rgba_waterbody = None
 
 	def __init__(self, elevation, waterbody, preRotatedWidth, preRotatedHeight, rotation, metersPerPixelAfterResize):
 		self.elevation = elevation.astype(np.single)
@@ -798,7 +799,7 @@ class TerrainCrop:
 			if not args.no_shade:
 				Image.fromarray(self.hillshade).save(storageDir + '/hillshade.tif')
 				print('saved', storageDir + '/hillshade.tif')
-			if not args.no_water:
+			if not args.no_water and not self.rgba_waterbody is None:
 				Image.fromarray(self.rgba_waterbody).save(storageDir + '/water.tif')
 				print('saved', storageDir + '/water.tif')
 			Image.fromarray(self.color_elev).save(storageDir + '/elevation_gradient.tif')
@@ -873,7 +874,6 @@ for m in get_monitors():
 		screenWidth = m.width
 	if screenHeight == None or m.height > screenHeight:
 		screenHeight = m.height
-print("screen:", screenWidth, screenHeight)
 
 if args.previous and os.path.exists(storageDir + '/previous.json'):
 	# get previous info if asked for and exists
@@ -935,15 +935,15 @@ while downloadCropAttempt < 20 and (arr is None or wbd_arr is None or allFlat(ar
 	downloadCropAttempt += 1
 
 if not args.previous:
+	# save images for use as previous
 	Image.fromarray(arr).save(storageDir + '/elevation-cropped.tif')
 	Image.fromarray(wbd_arr).save(storageDir + '/waterbody-cropped.tif')
+	# save information for use as previous
+	previousInfo = {'latitude':latitude, 'longitude':longitude, 'rotation':rotation, 'width':targetWidth, 'height':targetHeight}
+	with open(storageDir + '/previous.json', 'w') as write_file:
+		json.dump(previousInfo, write_file, indent='')
 
 thisCrop = TerrainCrop(arr, wbd_arr, preRotatedWidth, preRotatedHeight, rotation, downloadCompartment.metersPerPixelAfterResize)
 thisCrop.processData()
 thisCrop.saveImages()
-
-if not args.previous:
-	# save previous info
-	previousInfo = {'latitude':latitude, 'longitude':longitude, 'rotation':rotation, 'width':targetWidth, 'height':targetHeight}
-	with open(storageDir + '/previous.json', 'w') as write_file:
-		json.dump(previousInfo, write_file, indent='')
+	
