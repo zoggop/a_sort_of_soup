@@ -5,7 +5,6 @@ from PIL import Image
 import math
 from zipfile import ZipFile
 import coloraide
-from blend_modes import overlay
 from getpass import getpass
 import requests
 from io import BytesIO
@@ -204,6 +203,17 @@ def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha
 	np.take(lookupColor, greyArr, axis=0, out=colorArr)
 	return colorArr
 
+def overlayImages(a, b):
+	# overlay two RGB images
+	a = a.astype(float) / 255
+	b = b.astype(float) / 255 # make float on range 0-1
+	mask = a >= 0.5 # generate boolean mask of everywhere a > 0.5 
+	ab = np.zeros_like(a) # generate an output container for the blended image 
+	# now do the blending 
+	ab[~mask] = (2 * a * b)[~mask] # 2ab everywhere a < 0.5
+	ab[mask] = (1 - 2 * (1 - a) * (1 - b))[mask] # else this
+	return (ab * 255).astype(np.uint8)
+
 def image_histogram_equalization(image, number_bins=65536):
 	# from http://www.janeriksolem.net/histogram-equalization-with-python-and.html
 
@@ -382,6 +392,7 @@ class TileDownload:
 				self.setStatus("{} kB".format(kB))
 			content += chunk
 		self.content = content
+		self.response = None # to reduce memory usage
 
 	def downloadWithAuth(self):
 		response = requests.get(self.url, auth = requests.auth.HTTPBasicAuth(self.username, self.password), stream=True)
@@ -407,21 +418,23 @@ class TileDownload:
 				self.streamResponseWithStatus()
 
 	def extractAndRead(self):
-		if not self.content is None and not self.zippedFilename is None:
-			with ZipFile(BytesIO(self.content), 'r') as zf:
-				with zf.open(self.zippedFilename, mode='r') as zippedFile:
-					ext = os.path.splitext(self.zippedFilename)[1].lower()
-					raw = zippedFile.read()
-					if ext == '.hgt':
-						siz = len(raw)
-						dim = int(math.sqrt(siz/2))
-						self.array = np.frombuffer(raw, np.dtype('>i2'), dim*dim).reshape((dim, dim))
-					elif ext == '.raw':
-						siz = len(raw)
-						dim = int(math.sqrt(siz))
-						self.array = np.frombuffer(raw, np.uint8, dim*dim).reshape((dim, dim))
-					elif ext == '.tif':
-						self.array = np.array(Image.open(BytesIO(raw)))
+		if self.content is None or self.zippedFilename is None:
+			return
+		with ZipFile(BytesIO(self.content), 'r') as zf:
+			with zf.open(self.zippedFilename, mode='r') as zippedFile:
+				ext = os.path.splitext(self.zippedFilename)[1].lower()
+				raw = zippedFile.read()
+				if ext == '.hgt':
+					siz = len(raw)
+					dim = int(math.sqrt(siz/2))
+					self.array = np.frombuffer(raw, np.dtype('>i2'), dim*dim).reshape((dim, dim))
+				elif ext == '.raw':
+					siz = len(raw)
+					dim = int(math.sqrt(siz))
+					self.array = np.frombuffer(raw, np.uint8, dim*dim).reshape((dim, dim))
+				elif ext == '.tif':
+					self.array = np.array(Image.open(BytesIO(raw)))
+		self.content = None # to reduce memory usage
 
 class Compartment:
 
@@ -753,9 +766,8 @@ class TerrainCrop:
 		# blend colorized elevation with hillshade using overlay
 		if args.no_shade or self.hillshade is None:
 			return
-		hs_arr = np.array(Image.fromarray(self.hillshade).convert('RGBA')).astype(float)
-		color_el_arr = np.array(Image.fromarray(self.color_elev).convert('RGBA')).astype(float)
-		self.shaded_color_elev = np.array(Image.fromarray(overlay(color_el_arr, hs_arr, 1).astype(np.uint8)).convert('RGB'))
+		hs_arr = np.stack((self.hillshade, self.hillshade, self.hillshade), axis=2) # convert hillshade to RGB
+		self.shaded_color_elev = overlayImages(self.color_elev, hs_arr)
 
 	def superimposeWaterbody(self, waterColor):
 		if args.no_water or self.waterbody is None:
@@ -944,6 +956,7 @@ if not args.previous:
 		json.dump(previousInfo, write_file, indent='')
 
 thisCrop = TerrainCrop(arr, wbd_arr, preRotatedWidth, preRotatedHeight, rotation, downloadCompartment.metersPerPixelAfterResize)
+downloadCompartment = None # reduce memory usage
 thisCrop.processData()
 thisCrop.saveImages()
 	
