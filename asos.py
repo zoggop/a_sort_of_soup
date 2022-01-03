@@ -569,7 +569,7 @@ def downloadOneTile(tileDownload):
 	tileDownload.downloadWithAuth()
 	tileDownload.setStatus('extracting {:,} kB'.format(int(len(tileDownload.content) / 1024)))
 	tileDownload.extractAndRead()
-	tileDownload.setStatus('extracted {}x{} from {:,} kB'.format(tileDownload.array.shape[1], tileDownload.array.shape[0], int(len(tileDownload.content) / 1024)))
+	tileDownload.setStatus('extracted {}x{} {} {:,} kB'.format(tileDownload.array.shape[1], tileDownload.array.shape[0], tileDownload.array.dtype, int((tileDownload.array.size * tileDownload.array.itemsize) / 1024)))
 
 def allFlat(arr):
 	if arr is None:
