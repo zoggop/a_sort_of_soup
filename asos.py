@@ -216,7 +216,6 @@ def overlayImages(a, b):
 
 def image_histogram_equalization(image, number_bins=65536):
 	# from http://www.janeriksolem.net/histogram-equalization-with-python-and.html
-
 	# get image histogram
 	image_histogram, bins = np.histogram(image.flatten(), number_bins, density=True)
 	cdf = image_histogram.cumsum() # cumulative distribution function
@@ -224,7 +223,6 @@ def image_histogram_equalization(image, number_bins=65536):
 	cdf = (cdf - cdf[0]) * normal_mult # normalize
 	# use linear interpolation of cdf to find new pixel values
 	image_equalized = np.interp(image.flatten(), bins[:-1], cdf)
-
 	return image_equalized.reshape(image.shape)
 
 def slopeOfArray(array):
@@ -616,7 +614,7 @@ def pickHues(hueDeltaE):
 	return ah, bh, ch
 
 def pickLightnesses():
-	darkMidLight = [random.randint(5,30), random.randint(35, 65), random.randint(70,97)]
+	darkMidLight = [random.randint(5,34), random.randint(35, 65), random.randint(66,97)]
 	lOrders = [
 		[0, 1, 2],
 		[2, 0, 1],
@@ -645,7 +643,8 @@ def pickChromas():
 		if not args.chromas is None and len(args.chromas) > cIndex and args.chromas[cIndex] > -1:
 			chromas.append(args.chromas[cIndex])
 		else:
-			chromas.append((random.randint(0,1) == 1 and random.randint(0, args.maxchroma)) or args.maxchroma)
+			# chromas.append((random.randint(0,1) == 1 and random.randint(0, args.maxchroma)) or args.maxchroma)
+			chromas.append(random.randint(0, args.maxchroma))
 	print('chromas:', chromas)
 	return chromas
 
