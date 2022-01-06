@@ -11,7 +11,7 @@ from io import BytesIO
 import random
 import sys
 import json
-from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT
+from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT, randn
 from bs4 import BeautifulSoup
 import concurrent.futures
 from screeninfo import get_monitors
@@ -202,6 +202,21 @@ def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha
 	colorArr = np.zeros((*greyArr.shape, numChannels), dtype=np.uint8)
 	np.take(lookupColor, greyArr, axis=0, out=colorArr)
 	return colorArr
+
+def radialGradient(width, height, orientation=None):
+	if orientation is None:
+		orientation = random.randint(0, 3)
+	xys = [
+		[0, 1, 0, 1],
+		[1, 0, 0, 1],
+		[0, 1, 1, 0],
+		[1, 0, 1, 0]]
+	xy = xys[orientation]
+	X = np.linspace(xy[0], xy[1], width)[None, :]
+	Y = np.linspace(xy[2], xy[3], height)[:, None]
+	radgrad = np.sqrt(X**2 + Y**2)
+	radgrad = np.clip(0,1,radgrad)
+	return radgrad
 
 def overlayImages(a, b):
 	# overlay two RGB images
@@ -783,16 +798,20 @@ class TerrainCrop:
 		bottomLayer = self.shaded_color_elev
 		if bottomLayer is None:
 			bottomLayer = self.color_elev
+		# dealias waterbody image and create alpha
 		wbd_blur = GaussianBlur(self.waterbody, (3,3), 0.5, 0.5, BORDER_DEFAULT)
 		wbd_float = wbd_blur / 255
 		wbd_alpha = np.stack((wbd_float, wbd_float, wbd_float), axis=2)
 		# create radial gradient image
-		Y = np.linspace(0, 1, self.waterbody.shape[1])[None, :]
-		X = np.linspace(0, 1, self.waterbody.shape[0])[:, None]
-		radgrad = np.sqrt(X**2 + Y**2)
-		radgrad = 1 - np.clip(0,1,radgrad)
+		radgrad = radialGradient(self.waterbody.shape[1], self.waterbody.shape[0])
 		waterInterpolation = waterColors[0].interpolate(waterColors[1:], space='lch-d65')
-		wbd_radgrad = arrayColorizeWithInterpolation(radgrad, waterInterpolation, 2048)
+		wbd_radgrad = arrayColorizeWithInterpolation(radgrad, waterInterpolation, max(*self.waterbody.shape))
+		# add noise to gradient to prevent banding
+		noise = np.zeros(wbd_radgrad.shape, dtype=np.uint8)
+		m = (127, 127, 127)
+		s = (5, 5, 5)
+		randn(noise,m,s)
+		wbd_radgrad = overlayImages(wbd_radgrad, noise)
 		# superimpose radial gradient with waterbody alpha
 		self.color_map_with_waterbody = ( (wbd_radgrad * wbd_alpha) + (bottomLayer * (1 - wbd_alpha)) ).astype(np.uint8)
 		if args.output is None:
