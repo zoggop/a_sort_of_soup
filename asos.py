@@ -648,14 +648,23 @@ def pickChromas():
 	print('chromas:', chromas)
 	return chromas
 
-def pickWaterColor(landColors):
-	# pick a water color
-	wABC = random.randrange(0,len(landColors))
-	wHues = [c.convert('lch-d65').h for c in landColors]
-	wHues.pop(wABC)
-	waterColor = highestChromaColor(landColors[wABC].convert('lch-d65').l, random.choice(wHues), args.maxchroma)
-	print('water color:', waterColor.convert('lch-d65'))
-	return waterColor
+def pickWaterColors(landColors, num=2):
+	# pick water colors
+	unpicked = landColors.copy()
+	waterColors = []
+	for n in range(num):
+		index = random.randrange(len(unpicked))
+		lcolor = unpicked.pop(index)
+		allOthers = landColors.copy()
+		for ci in range(len(allOthers)):
+			c = allOthers[ci]
+			if c == lcolor:
+				allOthers.pop(ci)
+				break
+		color = highestChromaColor(lcolor.convert('lch-d65').l, random.choice(allOthers).convert('lch-d65').h, args.maxchroma)
+		print('water color {}:'.format(n), color.convert('lch-d65'))
+		waterColors.append(color)
+	return waterColors
 
 def highChromaGradient(lightnesses, chromas, hues):
 	a = highestChromaColor(lightnesses[0], hues[0], chromas[0])
@@ -768,7 +777,7 @@ class TerrainCrop:
 		hs_arr = np.stack((self.hillshade, self.hillshade, self.hillshade), axis=2) # convert hillshade to RGB
 		self.shaded_color_elev = overlayImages(self.color_elev, hs_arr)
 
-	def superimposeWaterbody(self, waterColor):
+	def superimposeWaterbody(self, waterColors):
 		if args.no_water or self.waterbody is None:
 			return
 		bottomLayer = self.shaded_color_elev
@@ -777,17 +786,19 @@ class TerrainCrop:
 		wbd_blur = GaussianBlur(self.waterbody, (3,3), 0.5, 0.5, BORDER_DEFAULT)
 		wbd_float = wbd_blur / 255
 		wbd_alpha = np.stack((wbd_float, wbd_float, wbd_float), axis=2)
-		wbd_one_color = np.zeros(bottomLayer.shape, dtype=np.uint8)
-		wbd_one_color[:] = (int(waterColor.r * 255), int(waterColor.g * 255), int(waterColor.b * 255))
-		self.color_map_with_waterbody = ( (wbd_one_color * wbd_alpha) + (bottomLayer * (1 - wbd_alpha)) ).astype(np.uint8)
+		# create radial gradient image
+		Y = np.linspace(0, 1, self.waterbody.shape[1])[None, :]
+		X = np.linspace(0, 1, self.waterbody.shape[0])[:, None]
+		radgrad = np.sqrt(X**2 + Y**2)
+		radgrad = 1 - np.clip(0,1,radgrad)
+		waterInterpolation = waterColors[0].interpolate(waterColors[1:], space='lch-d65')
+		wbd_radgrad = arrayColorizeWithInterpolation(radgrad, waterInterpolation, 2048)
+		# superimpose radial gradient with waterbody alpha
+		self.color_map_with_waterbody = ( (wbd_radgrad * wbd_alpha) + (bottomLayer * (1 - wbd_alpha)) ).astype(np.uint8)
 		if args.output is None:
 			# create an RGBA image of the color waterbody data to save
 			self.rgba_waterbody = np.zeros((*wbd_float.shape, 4), dtype=np.uint8)
-			wbd_r, wbd_g, wbd_b = np.zeros(wbd_float.shape, dtype=np.uint8), np.zeros(wbd_float.shape, dtype=np.uint8), np.zeros(wbd_float.shape, dtype=np.uint8)
-			wbd_r[:] = int(waterColor.r * 255)
-			wbd_g[:] = int(waterColor.g * 255)
-			wbd_b[:] = int(waterColor.b * 255)
-			self.rgba_waterbody = np.stack((wbd_r, wbd_g, wbd_b, wbd_blur), axis=2)
+			self.rgba_waterbody = np.stack((wbd_radgrad[:,:,0], wbd_radgrad[:,:,1], wbd_radgrad[:,:,2], wbd_blur), axis=2)
 
 	def saveImages(self):
 		final_arr = self.color_map_with_waterbody
@@ -831,8 +842,8 @@ class TerrainCrop:
 		self.shade()
 		self.overlayShade()
 		if not args.no_water:
-			waterColor = pickWaterColor([a, b, c])
-			self.superimposeWaterbody(waterColor)
+			waterColors = pickWaterColors([a, b, c])
+			self.superimposeWaterbody(waterColors)
 
 def checkOutLocationCodes(codes):
 	codesHaveSRTM, codesHaveASTER = False, False
