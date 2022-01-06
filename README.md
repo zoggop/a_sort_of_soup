@@ -67,11 +67,11 @@ optional arguments:
   --min-lightness [0-100]
                         Unless specified by --lightnesses, lightnesses will be
                         randomly chosen between --min-lightness and
-                        --maxlightness.
+                        --max-lightness.
   --max-lightness [0-100]
                         Unless specified by --lightnesses, lightnesses will be
                         randomly chosen between --min-lightness and
-                        --maxlightness.
+                        --max-lightness.
   --max-chroma [0-134]  Maximum chroma of image.
   --hue-delta [Delta-E]
                         Minimum color difference between hues as calculated by
