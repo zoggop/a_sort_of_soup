@@ -29,7 +29,8 @@ This is a python script that downloads a digital elevation model of a random loc
 usage: asos.py [-h] [--new-login] [--one-time-login] [--previous] [--no-water]
                [--no-shade] [--output [FILEPATH]]
                [--coordinates LATITUDE LONGITUDE] [--dimensions WIDTH HEIGHT]
-               [--rotation [0-3]] [--maxchroma [0-134]]
+               [--rotation [0-3]] [--min-lightness [0-100]]
+               [--max-lightness [0-100]] [--max-chroma [0-134]]
                [--hue-delta [Delta-E]] [--lightnesses 0-100 [0-100 ...]]
                [--chromas 0-134 [0-134 ...]] [--hues 0-359 [0-359 ...]]
 
@@ -63,7 +64,15 @@ optional arguments:
                         How many times 90 degrees to rotate. (0: North is up.
                         1: East is up. 2: South is up. 3: West is up.) If not
                         specified, this will be chosen randomly.
-  --maxchroma [0-134]   Maximum chroma of image.
+  --min-lightness [0-100]
+                        Unless specified by --lightnesses, lightnesses will be
+                        randomly chosen between --min-lightness and
+                        --maxlightness.
+  --max-lightness [0-100]
+                        Unless specified by --lightnesses, lightnesses will be
+                        randomly chosen between --min-lightness and
+                        --maxlightness.
+  --max-chroma [0-134]  Maximum chroma of image.
   --hue-delta [Delta-E]
                         Minimum color difference between hues as calculated by
                         CIE Delta-E 2000 at 57 lightness and 32 chroma. Values
