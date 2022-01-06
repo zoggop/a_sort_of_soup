@@ -629,7 +629,12 @@ def pickHues(hueDeltaE):
 	return ah, bh, ch
 
 def pickLightnesses():
-	darkMidLight = [random.randint(5,34), random.randint(35, 65), random.randint(66,97)]
+	lightSpan = args.max_lightness - args.min_lightness
+	lightInterval = math.floor(lightSpan / 3)
+	darkMidLight = [
+		random.randint(args.min_lightness, args.min_lightness + lightInterval - 1),
+		random.randint(args.min_lightness + lightInterval, args.max_lightness - lightInterval - 1),
+		random.randint(args.max_lightness - lightInterval,args.max_lightness)]
 	lOrders = [
 		[0, 1, 2],
 		[2, 0, 1],
@@ -658,8 +663,8 @@ def pickChromas():
 		if not args.chromas is None and len(args.chromas) > cIndex and args.chromas[cIndex] > -1:
 			chromas.append(args.chromas[cIndex])
 		else:
-			# chromas.append((random.randint(0,1) == 1 and random.randint(0, args.maxchroma)) or args.maxchroma)
-			chromas.append(random.randint(0, args.maxchroma))
+			# chromas.append((random.randint(0,1) == 1 and random.randint(0, args.max_chroma)) or args.max_chroma)
+			chromas.append(random.randint(0, args.max_chroma))
 	print('chromas:', chromas)
 	return chromas
 
@@ -676,7 +681,7 @@ def pickWaterColors(landColors, num=2):
 			if c == lcolor:
 				allOthers.pop(ci)
 				break
-		color = highestChromaColor(lcolor.convert('lch-d65').l, random.choice(allOthers).convert('lch-d65').h, args.maxchroma)
+		color = highestChromaColor(lcolor.convert('lch-d65').l, random.choice(allOthers).convert('lch-d65').h, args.max_chroma)
 		print('water color {}:'.format(n), color.convert('lch-d65'))
 		waterColors.append(color)
 	return waterColors
@@ -891,7 +896,9 @@ def parseArguments():
 	parser.add_argument('--coordinates', '-c', nargs=2, type=float, metavar=('LATITUDE', 'LONGITUDE'), help='Location of center of desired image in latitude longitude coordinates. If not specified, a random location will be chosen.')
 	parser.add_argument('--dimensions', '-d', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'), help='Width and height in pixels of output image. Larger images will require downloading more source tiles. Defaults to screen dimensions.')
 	parser.add_argument('--rotation', '-r', nargs='?', type=int, metavar='0-3', help='How many times 90 degrees to rotate. (0: North is up. 1: East is up. 2: South is up. 3: West is up.) If not specified, this will be chosen randomly.')
-	parser.add_argument('--maxchroma', nargs='?', type=float, default=134, metavar='0-134', help='Maximum chroma of image.')
+	parser.add_argument('--min-lightness', nargs='?', type=float, default=5, metavar='0-100', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --maxlightness.')
+	parser.add_argument('--max-lightness', nargs='?', type=float, default=97, metavar='0-100', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --maxlightness.')
+	parser.add_argument('--max-chroma', nargs='?', type=float, default=134, metavar='0-134', help='Maximum chroma of image.')
 	parser.add_argument('--hue-delta', nargs='?', type=int, metavar='Delta-E', help='Minimum color difference between hues as calculated by CIE Delta-E 2000 at 57 lightness and 32 chroma. Values over 35 will usually cause Delta-E between hues to be uneven. If not specified, this will be chosen randomly between 20 and 40.')
 	parser.add_argument('--lightnesses', nargs='+', type=int, metavar='0-100', help='Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
 	parser.add_argument('--chromas', nargs='+', type=int, metavar='0-134', help='Up to three chromas, in order of elevation. The remaining chromas will be chosen randomly. To specify only the second and/or third chroma, enter chromas of -1 to have them chosen randomly.')
