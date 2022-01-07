@@ -664,7 +664,7 @@ def pickChromas():
 			chromas.append(args.chromas[cIndex])
 		else:
 			# chromas.append((random.randint(0,1) == 1 and random.randint(0, args.max_chroma)) or args.max_chroma)
-			chromas.append(random.randint(0, args.max_chroma))
+			chromas.append(random.randint(args.min_chroma, args.max_chroma))
 	print('chromas:', chromas)
 	return chromas
 
@@ -898,10 +898,11 @@ def parseArguments():
 	parser.add_argument('--rotation', '-r', nargs='?', type=int, metavar='0-3', help='How many times 90 degrees to rotate. (0: North is up. 1: East is up. 2: South is up. 3: West is up.) If not specified, this will be chosen randomly.')
 	parser.add_argument('--min-lightness', nargs='?', type=float, default=5, metavar='0-100', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
 	parser.add_argument('--max-lightness', nargs='?', type=float, default=97, metavar='0-100', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
-	parser.add_argument('--max-chroma', nargs='?', type=float, default=134, metavar='0-134', help='Maximum chroma of image.')
-	parser.add_argument('--hue-delta', nargs='?', type=int, metavar='Delta-E', help='Minimum color difference between hues as calculated by CIE Delta-E 2000 at 57 lightness and 32 chroma. Values over 35 will usually cause Delta-E between hues to be uneven. If not specified, this will be chosen randomly between 20 and 40.')
+	parser.add_argument('--min-chroma', nargs='?', type=float, default=0, metavar='0-134', help='Attempt to choose colors with at least this minimum chromaticity.')
+	parser.add_argument('--max-chroma', nargs='?', type=float, default=134, metavar='0-134', help='Maximum chromaticity of image.')
+	parser.add_argument('--hue-delta', nargs='?', type=int, metavar='Delta-E', help='Minimum color difference between hues as calculated by CIE Delta-E 2000 at 57 lightness and 32 chromaticity. Values over 35 will usually cause Delta-E between hues to be uneven. If not specified, this will be chosen randomly between 20 and 40.')
 	parser.add_argument('--lightnesses', nargs='+', type=int, metavar='0-100', help='Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
-	parser.add_argument('--chromas', nargs='+', type=int, metavar='0-134', help='Up to three chromas, in order of elevation. The remaining chromas will be chosen randomly. To specify only the second and/or third chroma, enter chromas of -1 to have them chosen randomly.')
+	parser.add_argument('--chromas', nargs='+', type=int, metavar='0-134', help='Up to three chromaticities, in order of elevation. The remaining chromas will be chosen randomly. To specify only the second and/or third chromaticities, enter chromaticities of -1 to have them chosen randomly.')
 	parser.add_argument('--hues', nargs='+', type=int, metavar='0-359', help='Up to three hues, in order of elevation. The remaining hues will be chosen randomly. To specify only the second and/or third hue, enter hues of -1 to have them chosen randomly.')
 	return parser.parse_args()
 
