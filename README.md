@@ -30,9 +30,10 @@ usage: asos.py [-h] [--new-login] [--one-time-login] [--previous] [--no-water]
                [--no-shade] [--output [FILEPATH]]
                [--coordinates LATITUDE LONGITUDE] [--dimensions WIDTH HEIGHT]
                [--rotation [0-3]] [--min-lightness [0-100]]
-               [--max-lightness [0-100]] [--max-chroma [0-134]]
-               [--hue-delta [Delta-E]] [--lightnesses 0-100 [0-100 ...]]
-               [--chromas 0-134 [0-134 ...]] [--hues 0-359 [0-359 ...]]
+               [--max-lightness [0-100]] [--min-chroma [0-134]]
+               [--max-chroma [0-134]] [--hue-delta [Delta-E]]
+               [--lightnesses 0-100 [0-100 ...]] [--chromas 0-134 [0-134 ...]]
+               [--hues 0-359 [0-359 ...]]
 
 Create a colorful image of terrain of a random location.
 
@@ -66,27 +67,29 @@ optional arguments:
                         specified, this will be chosen randomly.
   --min-lightness [0-100]
                         Unless specified by --lightnesses, lightnesses will be
-                        randomly chosen between --min-lightness and
-                        --max-lightness.
+                        randomly chosen between --min-lightness and --max-
+                        lightness.
   --max-lightness [0-100]
                         Unless specified by --lightnesses, lightnesses will be
-                        randomly chosen between --min-lightness and
-                        --max-lightness.
-  --max-chroma [0-134]  Maximum chroma of image.
+                        randomly chosen between --min-lightness and --max-
+                        lightness.
+  --min-chroma [0-134]  Attempt to choose colors with at least this minimum
+                        chromaticity.
+  --max-chroma [0-134]  Maximum chromaticity of image.
   --hue-delta [Delta-E]
                         Minimum color difference between hues as calculated by
-                        CIE Delta-E 2000 at 57 lightness and 32 chroma. Values
-                        over 35 will usually cause Delta-E between hues to be
-                        uneven. If not specified, this will be chosen randomly
-                        between 20 and 40.
+                        CIE Delta-E 2000 at 57 lightness and 32 chromaticity.
+                        Values over 35 will usually cause Delta-E between hues
+                        to be uneven. If not specified, this will be chosen
+                        randomly between 20 and 40.
   --lightnesses 0-100 [0-100 ...]
                         Up to three lightnesses, in order of elevation. The
                         remaining lightnesses will be chosen randomly.
   --chromas 0-134 [0-134 ...]
-                        Up to three chromas, in order of elevation. The
+                        Up to three chromaticities, in order of elevation. The
                         remaining chromas will be chosen randomly. To specify
-                        only the second and/or third chroma, enter chromas of
-                        -1 to have them chosen randomly.
+                        only the second and/or third chromaticities, enter
+                        chromaticities of -1 to have them chosen randomly.
   --hues 0-359 [0-359 ...]
                         Up to three hues, in order of elevation. The remaining
                         hues will be chosen randomly. To specify only the

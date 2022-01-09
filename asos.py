@@ -67,14 +67,12 @@ def longitudeDistance(lonA, lonB):
 
 def earthRadiusInMetersAtLatitude(latitude):
 	# https://rechneronline.de/earth-radius/
-	# R = √ [ (r1² * cos(B))² + (r2² * sin(B))² ] / [ (r1 * cos(B))² + (r2 * sin(B))² ]
 	latRad = latitude * piPer180
 	return math.sqrt(  ( ((equatorRadiusSq * math.cos(latRad)) ** 2) + ((poleRadiusSq * math.sin(latRad)) ** 2) ) / ( ((equatorRadius * math.cos(latRad)) ** 2) + ((poleRadius * math.sin(latRad)) ** 2) )  )
 
 def measureLatLonInMeters(lat1, lon1, lat2, lon2):
 	R = earthRadiusInMetersAtLatitude((lat1 + lat2) / 2)
 	dLat = (lat2 * piPer180) - (lat1 * piPer180)
-	# dLon = (lon2 * piPer180) - (lon1 * piPer180)
 	dLon = longitudeDistance(lon1, lon2) * piPer180
 	a = math.sin(dLat/2) * math.sin(dLat/2) + math.cos(lat1 * piPer180) * math.cos(lat2 * piPer180) * math.sin(dLon/2) * math.sin(dLon/2)
 	c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
