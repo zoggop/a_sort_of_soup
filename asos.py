@@ -667,9 +667,22 @@ def pickChromas():
 	return chromas
 
 def pickWaterColors(landColors, num=2):
-	# pick water colors
 	unpicked = landColors.copy()
 	waterColors = []
+	if not args.water_colors is None:
+		# use specified water colors
+		lch = []
+		for component in args.water_colors:
+			lch.append(component)
+			if len(lch) == 3:
+				rgb = lch_to_rgb(*lch)
+				if rgb is None:
+					rgb = highestChromaColor(lch[0], lch[2])
+				waterColors.append(rgb)
+				print('water color {}:'.format(len(waterColors)-1), waterColors[-1].convert('lch-d65'))
+				lch = []
+		return waterColors
+	# pick water colors
 	for n in range(num):
 		index = random.randrange(len(unpicked))
 		lcolor = unpicked.pop(index)
@@ -856,16 +869,31 @@ class TerrainCrop:
 		self.constrainWaterbodyToLowSlope()
 		self.stretch()
 		self.rotate()
-		lightnesses = pickLightnesses()
-		chromas = pickChromas()
-		hues = pickHues(args.hue_delta)
-		interpolation, a, b, c = highChromaGradient(lightnesses, chromas, hues)
+		self.lightnesses = pickLightnesses()
+		self.chromas = pickChromas()
+		self.hues = pickHues(args.hue_delta)
+		interpolation, a, b, c = highChromaGradient(self.lightnesses, self.chromas, self.hues)
 		self.colorizeElevation(interpolation)
 		self.shade()
 		self.overlayShade()
 		if not args.no_water:
-			waterColors = pickWaterColors([a, b, c])
-			self.superimposeWaterbody(waterColors)
+			self.waterColors = pickWaterColors([a, b, c])
+			self.superimposeWaterbody(self.waterColors)
+
+	def colorDict(self):
+		# output dictionary of color information
+		wcLCH = []
+		for color in self.waterColors:
+			lch = color.convert('lch-d65')
+			wcLCH.append(lch.l)
+			wcLCH.append(lch.c)
+			wcLCH.append(lch.h)
+		out = {
+			'lightnesses' : self.lightnesses,
+			'chromas' : self.chromas,
+			'hues' : self.hues,
+			'water_colors' : wcLCH}
+		return out
 
 def checkOutLocationCodes(codes):
 	codesHaveSRTM, codesHaveASTER = False, False
@@ -888,6 +916,7 @@ def parseArguments():
 	parser.add_argument('--new-login', action='store_true', default=False, help='Enter an Earthdata username & password and store it encrypted for future use. Overwrites currently stored login information if any.')
 	parser.add_argument('--one-time-login', action='store_true', default=False, help='Enter an Earthdata username & password to use only for this run, and do not store it.')
 	parser.add_argument('--previous', '-p', action='store_true', default=False, help='Use previously downloaded data. --dimensions, --coordinates, and --rotation will have no effect.')
+	parser.add_argument('--previous-colors', action='store_true', default=False, help='Use previously used colors.')
 	parser.add_argument('--no-water', '-w', action='store_true', default=False, help='Do not draw bodies of water.')
 	parser.add_argument('--no-shade', '-s', action='store_true', default=False, help='Do not hillshade the terrain. This leaves only gradient-mapped elevations and water bodies.')
 	parser.add_argument('--output', '-o', nargs='?', type=str, metavar='FILEPATH', help='Path to save output image. If not specified, will save to ~/a_sort_of_soup/output.png along with elevation_gradient.tif, hillshade.tif, and water.tif')
@@ -902,6 +931,7 @@ def parseArguments():
 	parser.add_argument('--lightnesses', nargs='+', type=int, metavar='0-100', help='Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
 	parser.add_argument('--chromas', nargs='+', type=int, metavar='0-134', help='Up to three chromaticities, in order of elevation. The remaining chromas will be chosen randomly. To specify only the second and/or third chromaticities, enter chromaticities of -1 to have them chosen randomly.')
 	parser.add_argument('--hues', nargs='+', type=int, metavar='0-359', help='Up to three hues, in order of elevation. The remaining hues will be chosen randomly. To specify only the second and/or third hue, enter hues of -1 to have them chosen randomly.')
+	parser.add_argument('--water-colors', nargs='+', type=int, metavar='L C H', help='Any number of colors for the gradient to fill water bodies with, formatted in a flat list of Lightness Chroma Hue triplets.')
 	return parser.parse_args()
 
 args = parseArguments()
@@ -910,6 +940,19 @@ if args.hue_delta is None:
 
 if not os.path.exists(storageDir):
 	os.makedirs(storageDir)
+
+# use previous colors if asked for
+if args.previous_colors and os.path.exists(storageDir + '/previous-colors.json'):
+		with open(storageDir + '/previous-colors.json', "r") as read_file:
+			prevColors = json.load(read_file)
+			if args.lightnesses is None:
+				args.lightnesses = prevColors.get('lightnesses')
+			if args.chromas is None:
+				args.chromas = prevColors.get('chromas')
+			if args.hues is None:
+				args.hues = prevColors.get('hues')
+			if args.water_colors is None:
+				args.water_colors = prevColors.get('water_colors')
 
 SRTMlocationCodes = loadSRTMtileList()
 ASTERlocationCodes = loadASTERtileList()
@@ -994,4 +1037,7 @@ thisCrop = TerrainCrop(arr, wbd_arr, preRotatedWidth, preRotatedHeight, rotation
 downloadCompartment = None # reduce memory usage
 thisCrop.processData()
 thisCrop.saveImages()
-	
+
+# save colors for use as previous
+with open(storageDir + '/previous-colors.json', 'w') as write_file:
+	json.dump(thisCrop.colorDict(), write_file, indent="\t")
