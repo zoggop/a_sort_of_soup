@@ -15,6 +15,7 @@ from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT, randn
 from bs4 import BeautifulSoup
 import concurrent.futures
 from screeninfo import get_monitors
+import datetime
 
 # local modules
 import catacomb
@@ -161,7 +162,38 @@ def nextHueByDeltaE(hues, targetDeltaE):
 	# print("fallback", fallbackDeltaE)
 	return fallbackHue
 
-def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha=False):
+def floatRGBdither(arr):
+	# adapted from https://scipython.com/blog/floyd-steinberg-dithering/
+	startDT = datetime.datetime.now()
+	nc = 256
+	if arr.max() > 1:
+		arr = arr / arr.max()
+	width = arr.shape[1]
+	height = arr.shape[0]
+	ncMinusOne = nc - 1
+	sevenSixteenths = 7 / 16
+	fiveSixteenths = 5 / 16
+	threeSixteenths = 3 / 16
+	for ir in range(height):
+		for ic in range(width):
+			# NB need to copy here for RGB arrays otherwise err will be (0,0,0)!
+			old_val = arr[ir, ic].copy()
+			new_val = np.round(old_val * ncMinusOne) / ncMinusOne
+			arr[ir, ic] = new_val
+			err = old_val - new_val
+			# In this simple example, we will just ignore the border pixels.
+			if ic < width - 1:
+				arr[ir, ic+1] += err * sevenSixteenths
+			if ir < height - 1:
+				if ic > 0:
+					arr[ir+1, ic-1] += err * threeSixteenths
+				arr[ir+1, ic] += err * fiveSixteenths
+				if ic < width - 1:
+					arr[ir+1, ic+1] += err / 16
+	print("dithered", datetime.datetime.now() - startDT)
+	return (arr * 255).astype(np.uint8)
+
+def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha=False, floatChannels=False):
 	if numColors is None:
 		if greyArr.dtype == np.uint8:
 			numColors = 256
@@ -181,23 +213,17 @@ def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha
 	if alpha:
 		channels.append('alpha')
 	numChannels = len(channels)
-	lookupColor = np.zeros((numColors, numChannels), dtype=np.uint8)
-	if numColors <= 256:
-		for l in range(0, numColors):
-			n = l / divisor
-			lookupColor[l] = [int(getattr(interpolation(n), channels[ci]) * 255) for ci in range(numChannels)]
-			# lookupRGB[l] = [int(interpolation(n).red * 255), int(interpolation(n).green * 255), int(interpolation(n).blue * 255)]
-	else:
-		for l in range(0, numColors):
-			n = l / divisor
-			color = [getattr(interpolation(n), channels[ci]) * 255 for ci in range(numChannels)]
-			for ci in range(numChannels):
-				if bool(random.getrandbits(1)) == True:
-					color[ci] = max(0, min(255, math.ceil(color[ci])))
-				else:
-					color[ci] = max(0, min(255, math.floor(color[ci])))
-			lookupColor[l] = color
-	colorArr = np.zeros((*greyArr.shape, numChannels), dtype=np.uint8)
+	dt = np.uint8
+	if floatChannels:
+		dt = 'float32'
+	lookupColor = np.zeros((numColors, numChannels), dtype=dt)
+	for l in range(0, numColors):
+		n = l / divisor
+		if floatChannels:
+			lookupColor[l] = [max(0,min(1,getattr(interpolation(n), channels[ci]))) for ci in range(numChannels)]
+		else:
+			lookupColor[l] = [max(0,min(255,round(getattr(interpolation(n), channels[ci]) * 255))) for ci in range(numChannels)]
+	colorArr = np.zeros((*greyArr.shape, numChannels), dtype=dt)
 	np.take(lookupColor, greyArr, axis=0, out=colorArr)
 	return colorArr
 
@@ -324,11 +350,11 @@ def printDownloadStatus(tileDownloads, overwrite=True):
 	StatusPrintLock = False
 
 def listFD(url, ext=''):
-    response = requests.get(url)
-    if response.status_code != 200:
-    	return []
-    soup = BeautifulSoup(response.text, 'html.parser')
-    return [url + '/' + node.get('href') for node in soup.find_all('a') if node.get('href').endswith(ext)]
+	response = requests.get(url)
+	if response.status_code != 200:
+		return []
+	soup = BeautifulSoup(response.text, 'html.parser')
+	return [url + '/' + node.get('href') for node in soup.find_all('a') if node.get('href').endswith(ext)]
 
 def loadSRTMtileList():
 	# get source of tile list if one hasn't been yet generated
@@ -829,10 +855,12 @@ class TerrainCrop:
 		waterColors.sort(reverse = True, key = lambda color: color.convert('lch-d65').l)
 		waterInterpolation = waterColors[0].interpolate(waterColors[1:], space='lab-d65')
 		wbd_radgrad = arrayColorizeWithInterpolation(radgrad, waterInterpolation, max(*self.waterbody.shape))
+		# wbd_radgrad = arrayColorizeWithInterpolation(radgrad, waterInterpolation, max(*self.waterbody.shape), False, True)
+		# wbd_radgrad = floatRGBdither(wbd_radgrad)
 		# add noise to gradient to reduce banding
 		noise = np.zeros(wbd_radgrad.shape, dtype=np.uint8)
 		m = (127, 127, 127)
-		s = (3, 3, 3)
+		s = (1, 1, 1)
 		randn(noise,m,s)
 		wbd_radgrad = overlayImages(wbd_radgrad, noise)
 		# superimpose radial gradient with waterbody alpha
