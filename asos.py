@@ -825,6 +825,8 @@ class TerrainCrop:
 		wbd_alpha = np.stack((wbd_float, wbd_float, wbd_float), axis=2)
 		# create radial gradient image
 		radgrad = radialGradient(self.waterbody.shape[1], self.waterbody.shape[0])
+		# sort water colors by lightness descending
+		waterColors.sort(reverse = True, key = lambda color: color.convert('lch-d65').l)
 		waterInterpolation = waterColors[0].interpolate(waterColors[1:], space='lab-d65')
 		wbd_radgrad = arrayColorizeWithInterpolation(radgrad, waterInterpolation, max(*self.waterbody.shape))
 		# add noise to gradient to reduce banding
