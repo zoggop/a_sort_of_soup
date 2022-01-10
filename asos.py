@@ -162,37 +162,6 @@ def nextHueByDeltaE(hues, targetDeltaE):
 	# print("fallback", fallbackDeltaE)
 	return fallbackHue
 
-def floatRGBdither(arr):
-	# adapted from https://scipython.com/blog/floyd-steinberg-dithering/
-	startDT = datetime.datetime.now()
-	nc = 256
-	if arr.max() > 1:
-		arr = arr / arr.max()
-	width = arr.shape[1]
-	height = arr.shape[0]
-	ncMinusOne = nc - 1
-	sevenSixteenths = 7 / 16
-	fiveSixteenths = 5 / 16
-	threeSixteenths = 3 / 16
-	for ir in range(height):
-		for ic in range(width):
-			# NB need to copy here for RGB arrays otherwise err will be (0,0,0)!
-			old_val = arr[ir, ic].copy()
-			new_val = np.round(old_val * ncMinusOne) / ncMinusOne
-			arr[ir, ic] = new_val
-			err = old_val - new_val
-			# In this simple example, we will just ignore the border pixels.
-			if ic < width - 1:
-				arr[ir, ic+1] += err * sevenSixteenths
-			if ir < height - 1:
-				if ic > 0:
-					arr[ir+1, ic-1] += err * threeSixteenths
-				arr[ir+1, ic] += err * fiveSixteenths
-				if ic < width - 1:
-					arr[ir+1, ic+1] += err / 16
-	print("dithered", datetime.datetime.now() - startDT)
-	return (arr * 255).astype(np.uint8)
-
 def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha=False, floatChannels=False):
 	if numColors is None:
 		if greyArr.dtype == np.uint8:
@@ -855,8 +824,6 @@ class TerrainCrop:
 		waterColors.sort(reverse = True, key = lambda color: color.convert('lch-d65').l)
 		waterInterpolation = waterColors[0].interpolate(waterColors[1:], space='lab-d65')
 		wbd_radgrad = arrayColorizeWithInterpolation(radgrad, waterInterpolation, max(*self.waterbody.shape))
-		# wbd_radgrad = arrayColorizeWithInterpolation(radgrad, waterInterpolation, max(*self.waterbody.shape), False, True)
-		# wbd_radgrad = floatRGBdither(wbd_radgrad)
 		# add noise to gradient to reduce banding
 		noise = np.zeros(wbd_radgrad.shape, dtype=np.uint8)
 		m = (127, 127, 127)
