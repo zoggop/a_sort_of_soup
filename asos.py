@@ -202,13 +202,18 @@ def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha
 	return colorArr
 
 def radialGradient(width, height, orientation=None):
+	x0, y0 = 0, 0
+	if width > height:
+		x0 = 1 - (width / height)
+	elif height > width:
+		y0 = 1 - (height / width)
 	if orientation is None:
 		orientation = random.randint(0, 3)
 	xys = [
-		[0, 1, 0, 1],
-		[1, 0, 0, 1],
-		[0, 1, 1, 0],
-		[1, 0, 1, 0]]
+		[x0, 1, y0, 1],
+		[1, x0, y0, 1],
+		[x0, 1, 1, y0],
+		[1, x0, 1, y0]]
 	xy = xys[orientation]
 	X = np.linspace(xy[0], xy[1], width)[None, :]
 	Y = np.linspace(xy[2], xy[3], height)[:, None]
@@ -820,12 +825,12 @@ class TerrainCrop:
 		wbd_alpha = np.stack((wbd_float, wbd_float, wbd_float), axis=2)
 		# create radial gradient image
 		radgrad = radialGradient(self.waterbody.shape[1], self.waterbody.shape[0])
-		waterInterpolation = waterColors[0].interpolate(waterColors[1:], space='lch-d65')
+		waterInterpolation = waterColors[0].interpolate(waterColors[1:], space='lab-d65')
 		wbd_radgrad = arrayColorizeWithInterpolation(radgrad, waterInterpolation, max(*self.waterbody.shape))
-		# add noise to gradient to prevent banding
+		# add noise to gradient to reduce banding
 		noise = np.zeros(wbd_radgrad.shape, dtype=np.uint8)
 		m = (127, 127, 127)
-		s = (5, 5, 5)
+		s = (3, 3, 3)
 		randn(noise,m,s)
 		wbd_radgrad = overlayImages(wbd_radgrad, noise)
 		# superimpose radial gradient with waterbody alpha
