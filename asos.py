@@ -11,7 +11,7 @@ from io import BytesIO
 import random
 import sys
 import json
-from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT, randn #, medianBlur
+from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT #, medianBlur
 from bs4 import BeautifulSoup
 import concurrent.futures
 from screeninfo import get_monitors
@@ -160,6 +160,20 @@ def nextHueByDeltaE(hues, targetDeltaE):
 			fallbackHue = newHue
 	# print("fallback", fallbackDeltaE)
 	return fallbackHue
+
+# will be vectorized for use in randomDitherImage
+def randomDitherValue(v):
+	v255 = v * 255
+	low = math.floor(v255)
+	if random.random() > v255 - low:
+		return low
+	else:
+		return low + 1
+
+# dither a 0-1 float image to a 0-255 integer image
+def randomDitherImage(arr):
+	vectorRandDithVal = np.vectorize(randomDitherValue)
+	return vectorRandDithVal(arr).astype(np.uint8)
 
 def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha=False, floatChannels=False):
 	if numColors is None:
@@ -823,13 +837,9 @@ class TerrainCrop:
 		# sort water colors by lightness descending
 		waterColors.sort(reverse = True, key = lambda color: color.convert('lch-d65').l)
 		waterInterpolation = waterColors[0].interpolate(waterColors[1:], space='lab-d65')
-		wbd_radgrad = arrayColorizeWithInterpolation(radgrad, waterInterpolation, max(*self.waterbody.shape))
-		# add noise to gradient to reduce banding
-		noise = np.zeros(wbd_radgrad.shape, dtype=np.uint8)
-		m = (127, 127, 127)
-		s = (1, 1, 1)
-		randn(noise,m,s)
-		wbd_radgrad = overlayImages(wbd_radgrad, noise)
+		steps = math.ceil(math.sqrt((min(*self.waterbody.shape) ** 2) * 2))
+		wbd_radgrad = arrayColorizeWithInterpolation(radgrad, waterInterpolation, steps, False, True)
+		wbd_radgrad = randomDitherImage(wbd_radgrad)
 		# superimpose radial gradient with waterbody alpha
 		self.color_map_with_waterbody = ( (wbd_radgrad * wbd_alpha) + (bottomLayer * (1 - wbd_alpha)) ).astype(np.uint8)
 		if args.output is None:
