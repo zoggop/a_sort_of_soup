@@ -11,11 +11,10 @@ from io import BytesIO
 import random
 import sys
 import json
-from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT, randn
+from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT, randn #, medianBlur
 from bs4 import BeautifulSoup
 import concurrent.futures
 from screeninfo import get_monitors
-import datetime
 
 # local modules
 import catacomb
@@ -814,12 +813,13 @@ class TerrainCrop:
 		bottomLayer = self.shaded_color_elev
 		if bottomLayer is None:
 			bottomLayer = self.color_elev
-		# dealias waterbody image and create alpha
-		wbd_blur = GaussianBlur(self.waterbody, (3,3), 0.5, 0.5, BORDER_DEFAULT)
+		# de-alias waterbody image and create alpha
+		wbd_blur = self.waterbody # medianBlur(self.waterbody, 3)
+		wbd_blur = GaussianBlur(wbd_blur, (3,3), 0.5, 0.5, BORDER_DEFAULT)
 		wbd_float = wbd_blur / 255
 		wbd_alpha = np.stack((wbd_float, wbd_float, wbd_float), axis=2)
 		# create radial gradient image
-		radgrad = radialGradient(self.waterbody.shape[1], self.waterbody.shape[0])
+		radgrad = radialGradient(self.waterbody.shape[1], self.waterbody.shape[0], args.water_orient)
 		# sort water colors by lightness descending
 		waterColors.sort(reverse = True, key = lambda color: color.convert('lch-d65').l)
 		waterInterpolation = waterColors[0].interpolate(waterColors[1:], space='lab-d65')
@@ -894,7 +894,8 @@ class TerrainCrop:
 			'lightnesses' : self.lightnesses,
 			'chromas' : self.chromas,
 			'hues' : self.hues,
-			'water_colors' : wcLCH}
+			'water_colors' : wcLCH,
+			'water_orient' : args.water_orient}
 		return out
 
 def checkOutLocationCodes(codes):
@@ -918,13 +919,14 @@ def parseArguments():
 	parser.add_argument('--new-login', action='store_true', default=False, help='Enter an Earthdata username & password and store it encrypted for future use. Overwrites currently stored login information if any.')
 	parser.add_argument('--one-time-login', action='store_true', default=False, help='Enter an Earthdata username & password to use only for this run, and do not store it.')
 	parser.add_argument('--previous', '-p', action='store_true', default=False, help='Use previously downloaded data. --dimensions, --coordinates, and --rotation will have no effect.')
-	parser.add_argument('--previous-colors', action='store_true', default=False, help='Use previously used colors.')
+	parser.add_argument('--previous-colors', action='store_true', default=False, help='Use previously used colors. Any additional color arguments will override those specific parts of the previously used colors.')
 	parser.add_argument('--no-water', '-w', action='store_true', default=False, help='Do not draw bodies of water.')
 	parser.add_argument('--no-shade', '-s', action='store_true', default=False, help='Do not hillshade the terrain. This leaves only gradient-mapped elevations and water bodies.')
 	parser.add_argument('--output', '-o', nargs='?', type=str, metavar='FILEPATH', help='Path to save output image. If not specified, will save to ~/a_sort_of_soup/output.png along with elevation_gradient.tif, hillshade.tif, and water.tif')
 	parser.add_argument('--coordinates', '-c', nargs=2, type=float, metavar=('LATITUDE', 'LONGITUDE'), help='Location of center of desired image in latitude longitude coordinates. If not specified, a random location will be chosen.')
 	parser.add_argument('--dimensions', '-d', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'), help='Width and height in pixels of output image. Larger images will require downloading more source tiles. Defaults to screen dimensions.')
 	parser.add_argument('--rotation', '-r', nargs='?', type=int, metavar='0-3', help='How many times 90 degrees to rotate. (0: North is up. 1: East is up. 2: South is up. 3: West is up.) If not specified, this will be chosen randomly.')
+	parser.add_argument('--water-orient', nargs='?', type=int, metavar='0-3', help='The orientation of the gradient with which bodies of water are filled.')
 	parser.add_argument('--min-lightness', nargs='?', type=float, default=5, metavar='0-100', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
 	parser.add_argument('--max-lightness', nargs='?', type=float, default=97, metavar='0-100', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
 	parser.add_argument('--min-chroma', nargs='?', type=float, default=0, metavar='0-134', help='Attempt to choose colors with at least this minimum chromaticity.')
@@ -937,24 +939,22 @@ def parseArguments():
 	return parser.parse_args()
 
 args = parseArguments()
-if args.hue_delta is None:
-	args.hue_delta = random.randint(20, 40)
-
-if not os.path.exists(storageDir):
-	os.makedirs(storageDir)
 
 # use previous colors if asked for
 if args.previous_colors and os.path.exists(storageDir + '/previous-colors.json'):
 		with open(storageDir + '/previous-colors.json', "r") as read_file:
 			prevColors = json.load(read_file)
-			if args.lightnesses is None:
-				args.lightnesses = prevColors.get('lightnesses')
-			if args.chromas is None:
-				args.chromas = prevColors.get('chromas')
-			if args.hues is None:
-				args.hues = prevColors.get('hues')
-			if args.water_colors is None:
-				args.water_colors = prevColors.get('water_colors')
+			for k in prevColors.keys():
+				if getattr(args, k) is None:
+					setattr(args, k, prevColors.get(k))
+
+if args.hue_delta is None:
+	args.hue_delta = random.randint(20, 40)
+if args.water_orient is None:
+	args.water_orient = random.randint(0, 3)
+
+if not os.path.exists(storageDir):
+	os.makedirs(storageDir)
 
 SRTMlocationCodes = loadSRTMtileList()
 ASTERlocationCodes = loadASTERtileList()
