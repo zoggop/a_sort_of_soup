@@ -784,9 +784,17 @@ class TerrainCrop:
 		print("for shade", elevForShade.min(), elevForShade.max())
 		# create hillshade
 		shades = [
-			[350, 70, 0.9], # [350, 70, 0.9],
-			[15, 57, 0.7], #  [15, 60, 0.7],
-			[270, 50, 1], #    [270, 55, 1]
+		# 	[350, 70, 0.9],
+		# 	[15, 60, 0.7],
+		# 	[270, 55, 1]
+
+		# 	[350, 70, 0.9],
+		# 	[15, 57, 0.7],
+		# 	[270, 50, 1]
+
+			[195, 70, 0.92],
+			[75, 60, 0.96],
+			[315, 50, 1]
 		]
 		slopeForShade, aspectForShade = hillshadePreparations(elevForShade)
 		hsSum = None
@@ -797,13 +805,8 @@ class TerrainCrop:
 				hsSum = hs
 			else:
 				hsSum += hs
-		hs = autocontrast(hsSum, 255)
-		hs = hs + (127 - np.median(hs)) # linearly center median
-		if hs.min() < 0:
-			# compress negative values
-			widthBelow = 127 - hs.min()
-			hs = np.where(hs < 128, hs - (hs.min() * ((widthBelow - (hs - hs.min())) / widthBelow)), hs)
-		self.hillshade = hs.astype(np.uint8)
+		hs = hs * (0.5 / np.median(hs))
+		self.hillshade = (hs * 255).astype(np.uint8)
 
 	def colorizeElevation(self, interpolation):
 		# half-equalize elevation data with a wide range
