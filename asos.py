@@ -805,7 +805,8 @@ class TerrainCrop:
 				hsSum = hs
 			else:
 				hsSum += hs
-		hs = hs * (0.5 / np.median(hs))
+		hs = autocontrast(hs, hs.max()) + hs # boost the contrast slightly
+		hs = hs * (0.5 / np.median(hs)) # move median to center value
 		self.hillshade = (hs * 255).astype(np.uint8)
 
 	def colorizeElevation(self, interpolation):
