@@ -785,9 +785,9 @@ class TerrainCrop:
 		slopeForShade, aspectForShade = hillshadePreparations(elevForShade)
 		# hillshade layers: azimuth, altitude angle, opacity
 		shades = [
-			[350, 70, 0.65],
-			[15, 60, 0.50],
-			[270, 55, 0.70],
+			[350, 70, 0.7],
+			[15, 60, 0.6],
+			[270, 55, 0.5],
 		]
 		# create layered hillshade
 		hs = np.full(elevForShade.shape, 1, dtype='float32')
@@ -795,8 +795,8 @@ class TerrainCrop:
 			shade = shades[si]
 			hsLayer = hillshade(elevForShade, shade[0], shade[1], slopeForShade, aspectForShade)
 			# Image.fromarray((hsLayer*255).astype(np.uint8)).save(storageDir + '/hs-{}-{}.tif'.format(*shade))
-			hs = (hsLayer * shade[2]) + (hs * (1 - shade[2]))
-		# print(hs.min(), np.median(hs), hs.max())
+			opacity = shade[2]
+			hs = (hsLayer * opacity) + (hs * (1 - opacity))
 		hs -= (hs.min() * args.shadow_depth) # deepen shadows
 		hs = hs * (0.5 / np.median(hs)) # move median to center value
 		if args.shine > 0:
