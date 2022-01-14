@@ -788,13 +788,13 @@ class TerrainCrop:
 		# 	[15, 60, 0.7],
 		# 	[270, 55, 1]
 
-		# 	[350, 70, 0.9],
-		# 	[15, 57, 0.7],
-		# 	[270, 50, 1]
+			[350, 70, 0.9],
+			[15, 60, 0.7],
+			[270, 50, 1]
 
-			[195, 70, 0.92],
-			[75, 60, 0.96],
-			[315, 50, 1]
+			# [195, 70, 1],
+			# [75, 60, 1],
+			# [315, 50, 1]
 		]
 		slopeForShade, aspectForShade = hillshadePreparations(elevForShade)
 		hsSum = None
@@ -805,8 +805,13 @@ class TerrainCrop:
 				hsSum = hs
 			else:
 				hsSum += hs
-		hs = autocontrast(hs, hs.max()) + hs # boost the contrast slightly
+		hs = hsSum
+		hs -= (hs.min() * args.shadow_depth) # deepen shadows
 		hs = hs * (0.5 / np.median(hs)) # move median to center value
+		if args.shine > 0:
+			# add shininess
+			tval = ((1 - args.shine) * hs.max()) + args.shine
+			hs = np.where(hs > 0.5, hs * (1 + ( ((hs - 0.5) / (hs.max() - 0.5)) * ((tval / hs.max()) - 1)) ), hs)
 		self.hillshade = (hs * 255).astype(np.uint8)
 
 	def colorizeElevation(self, interpolation):
@@ -950,6 +955,8 @@ def parseArguments():
 	parser.add_argument('--chromas', nargs='+', type=int, metavar='0-134', help='Up to three chromaticities, in order of elevation. The remaining chromas will be chosen randomly. To specify only the second and/or third chromaticities, enter chromaticities of -1 to have them chosen randomly.')
 	parser.add_argument('--hues', nargs='+', type=int, metavar='0-359', help='Up to three hues, in order of elevation. The remaining hues will be chosen randomly. To specify only the second and/or third hue, enter hues of -1 to have them chosen randomly.')
 	parser.add_argument('--water-colors', nargs='+', type=int, metavar='L C H', help='Any number of colors for the gradient to fill water bodies with, formatted in a flat list of Lightness Chroma Hue triplets.')
+	parser.add_argument('--shadow-depth', nargs='?', type=float, default=1, metavar='0-1', help='Intensity of hillshade dark tones.')
+	parser.add_argument('--shine', nargs='?', type=float, default=0, metavar='0-1', help='Intensity of hillshade highlights.')
 	return parser.parse_args()
 
 args = parseArguments()
