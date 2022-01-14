@@ -273,7 +273,7 @@ def hillshade(array, azimuth, angle_altitude, slope=None, aspect=None):
 	shaded = np.sin(altituderad) * np.sin(slope)\
 	 + np.cos(altituderad) * np.cos(slope)\
 	 * np.cos((azimuthrad - np.pi/2.) - aspect)
-	return 255*((shaded + 1)/2)
+	return (shaded + 1)/2
 
 def autocontrast(arr, maxValue):
 	mult = maxValue / (arr.max() - arr.min())
@@ -782,30 +782,21 @@ class TerrainCrop:
 		# process elevation map for hillshading
 		elevForShade = self.elevation / self.metersPerPixelAfterResize # so that the height map's vertical units are the same as its horizontal units
 		print("for shade", elevForShade.min(), elevForShade.max())
-		# create hillshade
-		shades = [
-		# 	[350, 70, 0.9],
-		# 	[15, 60, 0.7],
-		# 	[270, 55, 1]
-
-			[350, 70, 0.9],
-			[15, 60, 0.7],
-			[270, 50, 1]
-
-			# [195, 70, 1],
-			# [75, 60, 1],
-			# [315, 50, 1]
-		]
 		slopeForShade, aspectForShade = hillshadePreparations(elevForShade)
-		hsSum = None
-		for shade in shades:
-			hs = hillshade(elevForShade, shade[0], shade[1], slopeForShade, aspectForShade) * shade[2]
-			# Image.fromarray(hs.astype(np.uint8)).save(storageDir + '/hs-{}-{}-{}.tif'.format(*shade))
-			if hsSum is None:
-				hsSum = hs
-			else:
-				hsSum += hs
-		hs = hsSum
+		# hillshade layers: azimuth, altitude angle, opacity
+		shades = [
+			[350, 70, 0.65],
+			[15, 60, 0.50],
+			[270, 55, 0.70],
+		]
+		# create layered hillshade
+		hs = np.full(elevForShade.shape, 1, dtype='float32')
+		for si in range(len(shades) - 1, -1, -1): # bottom layer first
+			shade = shades[si]
+			hsLayer = hillshade(elevForShade, shade[0], shade[1], slopeForShade, aspectForShade)
+			# Image.fromarray((hsLayer*255).astype(np.uint8)).save(storageDir + '/hs-{}-{}.tif'.format(*shade))
+			hs = (hsLayer * shade[2]) + (hs * (1 - shade[2]))
+		# print(hs.min(), np.median(hs), hs.max())
 		hs -= (hs.min() * args.shadow_depth) # deepen shadows
 		hs = hs * (0.5 / np.median(hs)) # move median to center value
 		if args.shine > 0:
@@ -914,7 +905,9 @@ class TerrainCrop:
 			'chromas' : self.chromas,
 			'hues' : self.hues,
 			'water_colors' : wcLCH,
-			'water_orient' : args.water_orient}
+			'water_orient' : args.water_orient,
+			'shadow_depth' : args.shadow_depth,
+			'shine' : args.shine}
 		return out
 
 def checkOutLocationCodes(codes):
