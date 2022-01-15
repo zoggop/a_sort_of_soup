@@ -21,6 +21,7 @@ import catacomb
 from perceptual_hues_lavg import perceptualHues
 
 storageDir = os.path.expanduser('~/a_sort_of_soup')
+scriptDir = os.path.split(os.path.realpath(__file__))[0]
 
 StatusPrintLock = False
 
@@ -107,12 +108,6 @@ def angleDist(a, b):
 
 def lch_to_rgb(lightness, chroma, hue):
 	c = coloraide.Color('lch-d65', [lightness, chroma, hue]).convert('srgb')
-	if c.in_gamut():
-		return c
-	return None
-
-def rgb_to_lch(red, green, blue):
-	c = coloraide.Color('srgb', [red/255, green/255, blue/255]).convert('lch-d65')
 	if c.in_gamut():
 		return c
 	return None
@@ -279,17 +274,8 @@ def autocontrast(arr, maxValue):
 	mult = maxValue / (arr.max() - arr.min())
 	return (arr - arr.min()) * mult
 
-def autocontrastedBool(arr):
-	return autocontrast(arr, 1).astype(bool)
-
 def autocontrastedUint8(arr):
 	return autocontrast(arr, 255).astype(np.uint8)
-
-def autocontrastedUint16(arr):
-	return autocontrast(arr, 65535).astype(np.uint16)
-
-def autocontrastedSingle(arr):
-	return (autocontrast(arr, 2) - 1).astype(np.single)
 
 def getEOSDISlogin():
 	if args.one_time_login:
@@ -340,7 +326,7 @@ def listFD(url, ext=''):
 
 def loadSRTMtileList():
 	# get source of tile list if one hasn't been yet generated
-	if not os.path.exists(storageDir + '/srtm_tile_list.json'):
+	if not os.path.exists(storageDir + '/srtm_tile_list.json') and not os.path.exists(scriptDir + '/srtm_tile_list.json'):
 		print('downloading SRTM tile list from https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json ...')
 		response = requests.get('https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json')
 		if response.status_code == 200:
@@ -354,13 +340,21 @@ def loadSRTMtileList():
 		else:
 			print('could not download', response.url)
 	# load tile list
-	with open(storageDir + '/srtm_tile_list.json', "r") as read_file:
+	if os.path.exists(storageDir + '/srtm_tile_list.json'):
+		filePath = storageDir + '/srtm_tile_list.json'
+	elif os.path.exists(scriptDir + '/srtm_tile_list.json'):
+		filePath = scriptDir + '/srtm_tile_list.json'
+	with open(filePath, "r") as read_file:
 		locCodes = json.load(read_file)
+	if not os.path.exists(storageDir + '/srtm_tile_list.json'):
+		# copy tile list to storage directory
+		with open(storageDir + '/srtm_tile_list.json', 'w') as write_file:
+				json.dump(locCodes, write_file, indent='')
 	return locCodes
 
 def loadASTERtileList():
 	# get source of tile list if one hasn't been yet generated
-	if not os.path.exists(storageDir + '/aster_tile_list.json'):
+	if not os.path.exists(storageDir + '/aster_tile_list.json') and not os.path.exists(scriptDir + '/aster_tile_list.json'):
 		print('downloading ASTER tile list from https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ ...')
 		locCodes = {}
 		for filename in listFD('https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/', 'zip'):
@@ -369,8 +363,16 @@ def loadASTERtileList():
 		with open(storageDir + '/aster_tile_list.json', 'w') as write_file:
 				json.dump(locCodes, write_file, indent='')
 	# load tile list
-	with open(storageDir + '/aster_tile_list.json', "r") as read_file:
+	if os.path.exists(storageDir + '/aster_tile_list.json'):
+		filePath = storageDir + '/aster_tile_list.json'
+	elif os.path.exists(scriptDir + '/aster_tile_list.json'):
+		filePath = scriptDir + '/aster_tile_list.json'
+	with open(filePath, "r") as read_file:
 		locCodes = json.load(read_file)
+	if not os.path.exists(storageDir + '/aster_tile_list.json'):
+		# copy tile list to storage directory
+		with open(storageDir + '/aster_tile_list.json', 'w') as write_file:
+				json.dump(locCodes, write_file, indent='')
 	return locCodes
 
 class TileDownload:
