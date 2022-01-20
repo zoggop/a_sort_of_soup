@@ -11,10 +11,11 @@ from io import BytesIO
 import random
 import sys
 import json
-from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT #, medianBlur
+from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT, medianBlur
 from bs4 import BeautifulSoup
 import concurrent.futures
 from screeninfo import get_monitors
+import datetime
 
 # local modules
 import catacomb
@@ -251,7 +252,8 @@ def slopeOfArray(array):
 	return np.sqrt(gy*gy + gx*gx)
 
 def hillshadePreparations(array):
-	x, y = np.gradient(array)
+	# x, y = np.gradient(array)
+	y, x = np.gradient(array)
 	slope = np.pi/2. - np.arctan(np.sqrt(x*x + y*y))
 	aspect = np.arctan2(-x, y)
 	return slope, aspect
@@ -259,7 +261,8 @@ def hillshadePreparations(array):
 def hillshade(array, azimuth, angle_altitude, slope=None, aspect=None):
 	azimuth = 360.0 - azimuth
 	if slope is None:
-		x, y = np.gradient(array)
+		# x, y = np.gradient(array)
+		y, x = np.gradient(array)
 		slope = np.pi/2. - np.arctan(np.sqrt(x*x + y*y))
 	if aspect is None:
 		aspect = np.arctan2(-x, y)
@@ -269,6 +272,128 @@ def hillshade(array, azimuth, angle_altitude, slope=None, aspect=None):
 	 + np.cos(altituderad) * np.cos(slope)\
 	 * np.cos((azimuthrad - np.pi/2.) - aspect)
 	return (shaded + 1)/2
+
+# def plotLine(sy, width):
+# 	dx = width
+# 	dy = round(sy * width)
+# 	yi = 1
+# 	if sy < 0:
+# 		yi = -1
+# 		dy = -dy
+# 	dy2 = 2 * dy
+# 	dy2MinusDx = dy2 - dx
+# 	dyMinusdx2 = 2 * (dy - dx)
+# 	D = dy2MinusDx
+# 	y = 0
+# 	line = []
+# 	for x in range(width):
+# 		line.append(y)
+# 		if D > 0:
+# 			y = y + yi
+# 			D = D + dyMinusdx2
+# 		D = D + dy2
+# 	return line
+
+def plotLine(sy, width):
+	y = 0
+	prevRoundY = 0
+	line = []
+	for x in range(width):
+		roundY = round(y)
+		diff = roundY - prevRoundY
+		line.append(diff)
+		y += sy
+		prevRoundY = roundY
+	return line
+
+def plotLightLine(azimuth, width, height):
+	dx = max(-1, min(1, 1 - (2 * math.ceil(math.cos(azimuth * piPer180)))))
+	dy = dx * math.tan(azimuth * piPer180)
+	print(azimuth, dx, dy)
+	isYline = False
+	if abs(dy) > 1:
+		isYline = True
+		dy = max(-1, min(1, 1 - (2 * math.ceil(math.sin(azimuth * piPer180)))))
+		dx = dy * (1 / math.tan(azimuth * piPer180))
+		line = plotLine(dx, height)
+	else:
+		line = plotLine(dy, width)
+	return line, isYline, dx, dy
+
+def rayShadows(elevation, azimuth, angle, undersample=2):
+	startDT = datetime.datetime.now()
+	azimuth = 360 - azimuth
+	azimuth = (azimuth + 180) % 360
+	dz = math.tan(angle * piPer180)
+	height, width = elevation.shape
+	height = round(height / undersample)
+	width = round(width / undersample)
+	XYline, isYline, dx, dy = plotLightLine(azimuth, width, height)
+	# dz *= math.sqrt((dx*dx) + (dy*dy))
+	twoRootDZ = math.sqrt(2) * dz
+	print(dx, dy, dz, isYline)
+	if undersample > 1:
+		elev = resize(elevation, dsize=(width, height), interpolation=INTER_LINEAR)
+	else:
+		elev = elevation
+	elev = elev / undersample
+	light = np.full((height, width), 255, dtype=np.uint8)
+	for y in range(height):
+		for x in range(width):
+			if light[y, x] == 255:
+				z = elev[y, x]
+				lx, ly, lz = x, y, z
+				if isYline:
+					if dy == -1:
+						run = range(y - 1, -1, -1)
+					else:
+						run = range(y + 1, height)
+				else:
+					if dx == -1:
+						run = range(x - 1, -1, -1)
+					else:
+						run = range(x + 1, width)
+				for li in run:
+					change = XYline[li]
+					if isYline:
+						ly = li
+						lx += change
+						if lx < 0 or lx > width - 1:
+							break
+					else:
+						lx = li
+						ly += change
+						if ly < 0 or ly > height - 1:
+							break
+					if change != 0:
+						lz -= twoRootDZ
+					else:
+						lz -= dz
+					tz = elev[ly, lx]
+					if lz > tz:
+						light[ly, lx] = 0
+					else:
+						break
+		light[y, 0] = light[y, 1] # fake x-edge with neighbor
+	# if dy != 0:
+	# 	# fake y-edge with neighbor
+	# 	if dy > 0:
+	# 		yEdge = 0
+	# 		yNeigh = 1
+	# 	elif dy < 0:
+	# 		yEdge = height - 1
+	# 		yNeigh = height - 2
+	# 	for x in range(width):
+	# 		light[yEdge, x] = light[yNeigh, x]
+	kernSize = (math.floor((undersample + 2) / 2) * 2) + 1
+	if undersample > 1:
+		lightResample = resize(light, dsize=(elevation.shape[1], elevation.shape[0]), interpolation=INTER_LINEAR)
+		lightResample = medianBlur(lightResample, kernSize)
+	else:
+		lightResample = light
+	lightResample = GaussianBlur(lightResample, (kernSize, kernSize), BORDER_DEFAULT)
+	print("ray shadows", datetime.datetime.now() - startDT)
+	return lightResample
 
 def autocontrast(arr, maxValue):
 	mult = maxValue / (arr.max() - arr.min())
@@ -778,18 +903,29 @@ class TerrainCrop:
 			self.waterbody = np.rot90(self.waterbody, k=rotation)
 		print("rotated", self.elevation.shape, arr.min(), arr.max())
 
-	def shade(self):
+	def shade(self, azimuth=315, angle=55, ambientStrength=0.5):
+		self.azimuth, self.angle, self.ambientStrength = azimuth, angle, ambientStrength
+		print(azimuth, angle, ambientStrength)
 		if args.no_shade:
 			return
 		# process elevation map for hillshading
 		elevForShade = self.elevation / self.metersPerPixelAfterResize # so that the height map's vertical units are the same as its horizontal units
 		print("for shade", elevForShade.min(), elevForShade.max())
 		slopeForShade, aspectForShade = hillshadePreparations(elevForShade)
+		lightMap = rayShadows(elevForShade, azimuth, angle, 1)
+		# for a in range(0, 359, 30):
+			# Image.fromarray(rayShadows(elevForShade, a, 15, 10)).save('{}/{}-light.tif'.format(storageDir, a))
+		self.lightShadow = lightMap
+		Image.fromarray(lightMap).save(storageDir + '/light.tif')
 		# hillshade layers: azimuth, altitude angle, opacity
+		# shades = [
+		# 	[350, 70, 0.7],
+		# 	[15, 60, 0.6],
+		# 	[270, 55, 0.5],
+		# ]
 		shades = [
-			[350, 70, 0.7],
-			[15, 60, 0.6],
-			[270, 55, 0.5],
+			# [azimuth, 90, ambientStrength * 0.5],
+			[azimuth, angle, 1],
 		]
 		# create layered hillshade
 		hs = np.full(elevForShade.shape, 1, dtype='float32')
@@ -849,6 +985,12 @@ class TerrainCrop:
 			self.rgba_waterbody = np.zeros((*wbd_float.shape, 4), dtype=np.uint8)
 			self.rgba_waterbody = np.stack((wbd_radgrad[:,:,0], wbd_radgrad[:,:,1], wbd_radgrad[:,:,2], wbd_blur), axis=2)
 
+	def castShadows(self):
+		ls_arr = np.stack((self.lightShadow, self.lightShadow, self.lightShadow), axis=2) # convert light/shadow map to RGB
+		opacity = 1 - self.ambientStrength
+		self.color_map_with_waterbody = (self.color_map_with_waterbody * (ls_arr/255) * opacity) + (self.color_map_with_waterbody * (1 - opacity))
+		self.color_map_with_waterbody = self.color_map_with_waterbody.astype(np.uint8)
+
 	def saveImages(self):
 		final_arr = self.color_map_with_waterbody
 		if final_arr is None:
@@ -888,11 +1030,15 @@ class TerrainCrop:
 		self.hues = pickHues(args.hue_delta)
 		interpolation, a, b, c = highChromaGradient(self.lightnesses, self.chromas, self.hues)
 		self.colorizeElevation(interpolation)
-		self.shade()
+		azimuth = random.randint(0, 8) * 45
+		angle = random.randint(10, 20)
+		ambientStrength = random.randint(50, 80) / 100
+		self.shade(azimuth, angle, ambientStrength)
 		self.overlayShade()
 		if not args.no_water:
 			self.waterColors = pickWaterColors([a, b, c])
 			self.superimposeWaterbody(self.waterColors)
+		self.castShadows()
 
 	def colorDict(self):
 		# output dictionary of color information
