@@ -273,6 +273,25 @@ def hillshade(array, azimuth, angle_altitude, slope=None, aspect=None):
 	 * np.cos((azimuthrad - np.pi/2.) - aspect)
 	return (shaded + 1)/2
 
+def multiHillshade(shades, elevForShade):
+	slopeForShade, aspectForShade = hillshadePreparations(elevForShade)
+	# create layered hillshade
+	hs = np.full(elevForShade.shape, 1, dtype='float32')
+	for si in range(len(shades) - 1, -1, -1): # bottom layer first
+		shade = shades[si]
+		hsLayer = hillshade(elevForShade, shade[0], shade[1], slopeForShade, aspectForShade)
+		# Image.fromarray((hsLayer*255).astype(np.uint8)).save(storageDir + '/hs-{}-{}.tif'.format(*shade))
+		opacity = shade[2] or (shade[1] / 90)
+		hs = (hsLayer * opacity) + (hs * (1 - opacity))
+	hs -= (hs.min() * args.shadow_depth) # deepen shadows
+	hs = hs * (0.5 / np.median(hs)) # move median to center value
+	if args.shine > 0:
+		# add shininess
+		tval = ((1 - args.shine) * hs.max()) + args.shine
+		hs = np.where(hs > 0.5, hs * (1 + ( ((hs - 0.5) / (hs.max() - 0.5)) * ((tval / hs.max()) - 1)) ), hs)
+	# return (hs * 255).astype(np.uint8)
+	return hs
+
 # def plotLine(sy, width):
 # 	dx = width
 # 	dy = round(sy * width)
@@ -903,7 +922,7 @@ class TerrainCrop:
 			self.waterbody = np.rot90(self.waterbody, k=rotation)
 		print("rotated", self.elevation.shape, arr.min(), arr.max())
 
-	def shade(self, azimuth=315, angle=55, ambientStrength=0.5):
+	def shade(self, azimuth=135, angle=45, ambientStrength=0.67):
 		self.azimuth, self.angle, self.ambientStrength = azimuth, angle, ambientStrength
 		print(azimuth, angle, ambientStrength)
 		if args.no_shade:
@@ -911,36 +930,29 @@ class TerrainCrop:
 		# process elevation map for hillshading
 		elevForShade = self.elevation / self.metersPerPixelAfterResize # so that the height map's vertical units are the same as its horizontal units
 		print("for shade", elevForShade.min(), elevForShade.max())
-		slopeForShade, aspectForShade = hillshadePreparations(elevForShade)
-		lightMap = rayShadows(elevForShade, azimuth, angle, 1)
-		# for a in range(0, 359, 30):
-			# Image.fromarray(rayShadows(elevForShade, a, 15, 10)).save('{}/{}-light.tif'.format(storageDir, a))
-		self.lightShadow = lightMap
-		Image.fromarray(lightMap).save(storageDir + '/light.tif')
 		# hillshade layers: azimuth, altitude angle, opacity
-		# shades = [
-		# 	[350, 70, 0.7],
-		# 	[15, 60, 0.6],
-		# 	[270, 55, 0.5],
-		# ]
-		shades = [
-			# [azimuth, 90, ambientStrength * 0.5],
+		directShades = [
 			[azimuth, angle, 1],
 		]
-		# create layered hillshade
-		hs = np.full(elevForShade.shape, 1, dtype='float32')
-		for si in range(len(shades) - 1, -1, -1): # bottom layer first
-			shade = shades[si]
-			hsLayer = hillshade(elevForShade, shade[0], shade[1], slopeForShade, aspectForShade)
-			# Image.fromarray((hsLayer*255).astype(np.uint8)).save(storageDir + '/hs-{}-{}.tif'.format(*shade))
-			opacity = shade[2]
-			hs = (hsLayer * opacity) + (hs * (1 - opacity))
-		hs -= (hs.min() * args.shadow_depth) # deepen shadows
-		hs = hs * (0.5 / np.median(hs)) # move median to center value
-		if args.shine > 0:
-			# add shininess
-			tval = ((1 - args.shine) * hs.max()) + args.shine
-			hs = np.where(hs > 0.5, hs * (1 + ( ((hs - 0.5) / (hs.max() - 0.5)) * ((tval / hs.max()) - 1)) ), hs)
+		aFromUp = 90 - angle
+		ambientShades = [
+			[0, 90, 0.3],
+			[(azimuth + 20) % 360, 90 - (aFromUp / 5), 0.60],
+			[(azimuth + 45) % 360, 90 - (aFromUp / 4), 0.55],
+			[(azimuth - 60) % 360, 90 - (aFromUp / 3), 0.50],
+		]
+		directHS = multiHillshade(directShades, elevForShade)
+		ambientHS = multiHillshade(ambientShades, elevForShade)
+		# mix some of ambient into direct
+		adjustedAmbi = ambientStrength * 0.67
+		directHS = (directHS * (1 - adjustedAmbi)) + (ambientHS * adjustedAmbi)
+		# Image.fromarray((directHS * 255).astype(np.uint8)).save(storageDir + '/direct_hs.tif')
+		# Image.fromarray((ambientHS * 255).astype(np.uint8)).save(storageDir + '/ambient_hs.tif')
+		# draw light/shadow map
+		lightMap = rayShadows(elevForShade, azimuth, angle, 1)
+		Image.fromarray(lightMap).save(storageDir + '/light.tif')
+		# use light/shadow map as mask for direct and ambient hillshades
+		hs = ((lightMap/255) * directHS) + ((1 - (lightMap / 255)) * ambientStrength * ambientHS)
 		self.hillshade = (hs * 255).astype(np.uint8)
 
 	def colorizeElevation(self, interpolation):
@@ -985,12 +997,6 @@ class TerrainCrop:
 			self.rgba_waterbody = np.zeros((*wbd_float.shape, 4), dtype=np.uint8)
 			self.rgba_waterbody = np.stack((wbd_radgrad[:,:,0], wbd_radgrad[:,:,1], wbd_radgrad[:,:,2], wbd_blur), axis=2)
 
-	def castShadows(self):
-		ls_arr = np.stack((self.lightShadow, self.lightShadow, self.lightShadow), axis=2) # convert light/shadow map to RGB
-		opacity = 1 - self.ambientStrength
-		self.color_map_with_waterbody = (self.color_map_with_waterbody * (ls_arr/255) * opacity) + (self.color_map_with_waterbody * (1 - opacity))
-		self.color_map_with_waterbody = self.color_map_with_waterbody.astype(np.uint8)
-
 	def saveImages(self):
 		final_arr = self.color_map_with_waterbody
 		if final_arr is None:
@@ -1031,14 +1037,13 @@ class TerrainCrop:
 		interpolation, a, b, c = highChromaGradient(self.lightnesses, self.chromas, self.hues)
 		self.colorizeElevation(interpolation)
 		azimuth = random.randint(0, 8) * 45
-		angle = random.randint(10, 20)
-		ambientStrength = random.randint(50, 80) / 100
+		angle = random.randint(8, 25)
+		ambientStrength = random.randint(50, 85) / 100
 		self.shade(azimuth, angle, ambientStrength)
 		self.overlayShade()
 		if not args.no_water:
 			self.waterColors = pickWaterColors([a, b, c])
 			self.superimposeWaterbody(self.waterColors)
-		self.castShadows()
 
 	def colorDict(self):
 		# output dictionary of color information
