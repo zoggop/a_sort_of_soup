@@ -943,7 +943,6 @@ class TerrainCrop:
 		print("rotated", self.elevation.shape, arr.min(), arr.max())
 
 	def shade(self, azimuth=135, angle=45, ambientStrength=0.67):
-		self.azimuth, self.angle, self.ambientStrength = azimuth, angle, ambientStrength
 		print(azimuth, angle, ambientStrength)
 		if args.no_shade:
 			return
@@ -968,7 +967,7 @@ class TerrainCrop:
 		directHS = (directHS * (1 - adjustedAmbi)) + (ambientHS * adjustedAmbi)
 		# Image.fromarray((directHS * 255).astype(np.uint8)).save(storageDir + '/direct_hs.tif')
 		# Image.fromarray((ambientHS * 255).astype(np.uint8)).save(storageDir + '/ambient_hs.tif')
-		if angle < 45 and not args.no_shadows:
+		if not args.no_shadows and ambientStrength < 1 and angle < 45:
 			# draw light/shadow map
 			lightMap = rayShadows(elevForShade, azimuth, angle, 1)
 			self.light_map = lightMap
@@ -1160,7 +1159,7 @@ if args.previous_light and os.path.exists(storageDir + '/previous-light.json'):
 			prevLight = json.load(read_file)
 			for k in prevLight.keys():
 				if getattr(args, k) is None:
-					setattr(args, k, prevColors.get(k))
+					setattr(args, k, prevLight.get(k))
 
 if args.hue_delta is None:
 	args.hue_delta = random.randint(20, 40)
@@ -1169,7 +1168,7 @@ if args.azimuth is None:
 else:
 	args.azimuth = (round(args.azimuth / 45) % 8) * 45
 if args.altitude_angle is None:
-	args.altitude_angle = random.randint(7, 50)
+	args.altitude_angle = random.randint(7, 45)
 if args.ambient_strength is None:
 	args.ambient_strength = random.randint(55, 80) / 100
 
