@@ -1086,9 +1086,17 @@ class TerrainCrop:
 			'lightnesses' : self.lightnesses,
 			'chromas' : self.chromas,
 			'hues' : self.hues,
-			'water_colors' : wcLCH,
+			'water_colors' : wcLCH}
+		return out
+
+	def lightDict(self):
+		# output dictionary of color information
+		out = {
 			'shadow_depth' : args.shadow_depth,
-			'shine' : args.shine}
+			'shine' : args.shine,
+			'azimuth' : args.azimuth,
+			'altitude_angle' : args.altitude_angle,
+			'ambient_strength' : args.ambient_strength}
 		return out
 
 def checkOutLocationCodes(codes):
@@ -1113,6 +1121,7 @@ def parseArguments():
 	parser.add_argument('--one-time-login', action='store_true', default=False, help='Enter an Earthdata username & password to use only for this run, and do not store it.')
 	parser.add_argument('--previous', '-p', action='store_true', default=False, help='Use previously downloaded data. --dimensions, --coordinates, and --rotation will have no effect.')
 	parser.add_argument('--previous-colors', action='store_true', default=False, help='Use previously used colors. Any additional color arguments will override those specific parts of the previously used colors.')
+	parser.add_argument('--previous-light', action='store_true', default=False, help='Use previously used lighting. Any additional lighting arguments will override those specific parts of the previously used lighting.')
 	parser.add_argument('--no-water', '-w', action='store_true', default=False, help='Do not draw bodies of water.')
 	parser.add_argument('--no-shade', '-s', action='store_true', default=False, help='Do not hillshade the terrain. This leaves only gradient-mapped elevations and water bodies.')
 	parser.add_argument('--no-shadows', action='store_true', default=False, help='Do not cast shadows.')
@@ -1143,6 +1152,13 @@ if args.previous_colors and os.path.exists(storageDir + '/previous-colors.json')
 		with open(storageDir + '/previous-colors.json', "r") as read_file:
 			prevColors = json.load(read_file)
 			for k in prevColors.keys():
+				if getattr(args, k) is None:
+					setattr(args, k, prevColors.get(k))
+# use previous lighting if asked for
+if args.previous_light and os.path.exists(storageDir + '/previous-light.json'):
+		with open(storageDir + '/previous-light.json', "r") as read_file:
+			prevLight = json.load(read_file)
+			for k in prevLight.keys():
 				if getattr(args, k) is None:
 					setattr(args, k, prevColors.get(k))
 
@@ -1247,3 +1263,6 @@ thisCrop.saveImages()
 # save colors for use as previous
 with open(storageDir + '/previous-colors.json', 'w') as write_file:
 	json.dump(thisCrop.colorDict(), write_file, indent="\t")
+# save lighting for use as previous
+with open(storageDir + '/previous-light.json', 'w') as write_file:
+	json.dump(thisCrop.lightDict(), write_file, indent="\t")
