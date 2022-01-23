@@ -612,16 +612,21 @@ class TileDownload:
 			with zf.open(self.zippedFilename, mode='r') as zippedFile:
 				ext = os.path.splitext(self.zippedFilename)[1].lower()
 				raw = zippedFile.read()
+				arr = None
 				if ext == '.hgt':
 					siz = len(raw)
 					dim = int(math.sqrt(siz/2))
-					return np.frombuffer(raw, np.dtype('>i2'), dim*dim).reshape((dim, dim))
+					arr = np.frombuffer(raw, np.dtype('>i2'), dim*dim).reshape((dim, dim))
 				elif ext == '.raw':
 					siz = len(raw)
 					dim = int(math.sqrt(siz))
-					return np.frombuffer(raw, np.uint8, dim*dim).reshape((dim, dim))
+					arr = np.frombuffer(raw, np.uint8, dim*dim).reshape((dim, dim))
 				elif ext == '.tif':
-					return np.array(Image.open(BytesIO(raw)))
+					arr = np.array(Image.open(BytesIO(raw)))
+				if not arr is None and self.layer == 'waterbody':
+					arr = arr > arr.min()
+				return arr
+
 
 class Compartment:
 
@@ -755,7 +760,6 @@ class Compartment:
 
 def downloadOneTile(tileDownload):
 	tileDownload.downloadWithAuth()
-	# tileDownload.extractAndRead()
 
 def allFlat(arr):
 	if arr is None:
@@ -916,7 +920,7 @@ class TerrainCrop:
 			print("clipped to sea level", self.elevation.min(), self.elevation.max())
 
 	def constrainWaterbodyToLowSlope(self):
-		# restrict waterbody image to only those areas with 0 slope, so it doesn't cut off the hillshade
+		# restrict waterbody image to only those areas with low slope, so it doesn't cut off the hillshade
 		if self.waterbody is None:
 			return
 		slope = slopeOfArray(self.elevation)
