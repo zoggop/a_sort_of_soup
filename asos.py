@@ -307,37 +307,24 @@ def multiHillshade(shades, elevForShade):
 	# return (hs * 255).astype(np.uint8)
 	return hs
 
-# def plotLine(sy, width):
-# 	dx = width
-# 	dy = round(sy * width)
-# 	yi = 1
-# 	if sy < 0:
-# 		yi = -1
-# 		dy = -dy
-# 	dy2 = 2 * dy
-# 	dy2MinusDx = dy2 - dx
-# 	dyMinusdx2 = 2 * (dy - dx)
-# 	D = dy2MinusDx
-# 	y = 0
-# 	line = []
-# 	for x in range(width):
-# 		line.append(y)
-# 		if D > 0:
-# 			y = y + yi
-# 			D = D + dyMinusdx2
-# 		D = D + dy2
-# 	return line
-
 def plotLine(sy, width):
-	y = 0
-	prevRoundY = 0
+	dx = width
+	dy = round(sy * width)
+	yi = 1
+	if sy < 0:
+		yi = -1
+		dy = -dy
+	dy2 = 2 * dy
+	dyMinusdx2 = 2 * (dy - dx)
+	D = dy2 - dx
 	line = []
 	for x in range(width):
-		roundY = round(y)
-		diff = roundY - prevRoundY
+		diff = 0
+		if D > 0:
+			diff = yi
+			D = D + dyMinusdx2
+		D = D + dy2
 		line.append(diff)
-		y += sy
-		prevRoundY = roundY
 	return line
 
 def plotLightLine(azimuth, width, height):
