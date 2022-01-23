@@ -529,11 +529,11 @@ class TileDownload:
 
 	zippedFilename = None
 	status = None
-	content = None
-	array = None
+	missing = False
 
 	def __init__(self, baseUrl, locationCode, layer, baseZippedFilename, username, password, container):
 		self.url = baseUrl.replace('^^^', locationCode)
+		self.filepath = "{}/{}".format(storageDir, self.url.rsplit('/', 1)[-1])
 		self.zippedFilename = baseZippedFilename.replace('^^^', locationCode)
 		self.locationCode = locationCode
 		self.layer = layer
@@ -546,9 +546,6 @@ class TileDownload:
 		self.status = newStatus + spaces
 		printDownloadStatus(self.container.tileDownloads)
 
-	def blankArray(self, width=3601, height=3601):
-		self.array = np.zeros((height, width), dtype=np.uint8)
-
 	def streamResponseWithStatus(self):
 		if self.response is None:
 			print("no response to stream")
@@ -557,22 +554,28 @@ class TileDownload:
 		if self.response.headers and self.response.headers.get('Content-Length'):
 			totalkB = int(int(self.response.headers.get('Content-Length')) / 1024)
 		kB = 0
-		content = b''
+		# content = b''
+		write_file = open(self.filepath, 'wb')
 		for chunk in self.response.iter_content(chunk_size=1024*10):
-			kB = kB + 10
+			kB += 10
 			if not totalkB is None:
 				kB = min(kB, totalkB)
 				percent = int((kB / totalkB) * 100)
 				self.setStatus("{}% ({:,} / {:,} kB)".format(percent, kB, totalkB))
 			else:
 				self.setStatus("{} kB".format(kB))
-			content += chunk
-		self.content = content
+			write_file.write(chunk)
+			# content += chunk
+		self.fileSize = kB * 1024
+		write_file.close()
 		self.response = None # to reduce memory usage
 
 	def downloadWithAuth(self):
 		response = requests.get(self.url, auth = requests.auth.HTTPBasicAuth(self.username, self.password), stream=True)
-		if response.status_code == 200:
+		if response.status_code == 404:
+				self.setStatus('404')
+				self.missing = True
+		elif response.status_code == 200:
 			self.response = response
 			self.streamResponseWithStatus()
 		elif response.url:
@@ -581,36 +584,44 @@ class TileDownload:
 			response2 = None
 			while response2 is None:
 				try:
-					response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(self.username, self.password), headers = {'user-agent': 'Firefox'}, stream=True)
+					response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(self.username, self.password), stream=True)
 				except requests.ConnectionError:
 					self.setStatus('retrying after {} attempt'.format(attempt))
 					response2 = None
 				attempt += 1
 			if response2.status_code == 404:
 				self.setStatus('404')
-				self.blankArray()
+				self.missing = True
 			else:
 				self.response = response2
 				self.streamResponseWithStatus()
+		if not self.missing:
+			self.setStatus('downloaded {:,} kB'.format(int((self.fileSize or 0) / 1024)))
 
 	def extractAndRead(self):
-		if self.content is None or self.zippedFilename is None:
-			return
-		with ZipFile(BytesIO(self.content), 'r') as zf:
+		if not os.path.exists(self.filepath):
+			if self.missing:
+				# create an array of zeros to fill in missing data
+				dataType = bool
+				if self.layer != 'waterbody':
+					dataType = np.uint16
+				return np.zeros((3601, 3601), dtype=dataType)
+			else:
+				return None
+		with ZipFile(self.filepath, 'r') as zf:
 			with zf.open(self.zippedFilename, mode='r') as zippedFile:
 				ext = os.path.splitext(self.zippedFilename)[1].lower()
 				raw = zippedFile.read()
 				if ext == '.hgt':
 					siz = len(raw)
 					dim = int(math.sqrt(siz/2))
-					self.array = np.frombuffer(raw, np.dtype('>i2'), dim*dim).reshape((dim, dim))
+					return np.frombuffer(raw, np.dtype('>i2'), dim*dim).reshape((dim, dim))
 				elif ext == '.raw':
 					siz = len(raw)
 					dim = int(math.sqrt(siz))
-					self.array = np.frombuffer(raw, np.uint8, dim*dim).reshape((dim, dim))
+					return np.frombuffer(raw, np.uint8, dim*dim).reshape((dim, dim))
 				elif ext == '.tif':
-					self.array = np.array(Image.open(BytesIO(raw)))
-		self.content = None # to reduce memory usage
+					return np.array(Image.open(BytesIO(raw)))
 
 class Compartment:
 
@@ -683,19 +694,16 @@ class Compartment:
 		self.tileDownloads = tileDownloads
 		self.downloadTilesConcurrently()
 
-	def arrangeTiles(self, selectedLayer=None):
+	def arrangeTiles(self, selectedLayer):
 		# get bounds
 		latMin, latMax, lonMin, lonMax = None, None, None, None
-		layers = {}
+		thisLayer = {}
 		for td in self.tileDownloads:
-			layer = td.layer
-			if selectedLayer is None or layer == selectedLayer:
+			if td.layer == selectedLayer:
 				lat, lon = parseLocationCode(td.locationCode)
-				if layers.get(layer) is None:
-					layers[layer] = {'lats':{}}
-				if layers.get(layer).get('lats').get(lat) is None:
-					layers[layer]['lats'][lat] = {}
-				layers[layer]['lats'][lat][lon] = td.array
+				if thisLayer.get(lat) is None:
+					thisLayer[lat] = {}
+				thisLayer[lat][lon] = td.extractAndRead()
 				if latMin is None or lat < latMin:
 					latMin = lat
 				if latMax is None or lat > latMax:
@@ -704,48 +712,50 @@ class Compartment:
 					lonMin = lon
 				if lonMax is None or lon > lonMax:
 					lonMax = lon
-		outLayers = {}
-		for layer in layers.keys():
-			thisLayer = layers.get(layer)
-			rows = None
-			for lat in range(latMax, latMin-1, -1):
-				row = None
-				for lonAdd in range(0, longitudeDistance(lonMin, lonMax) + 1):
-					if lonMin < 0 and lonMax > 0:
-						lon = lonMax + lonAdd
-					else:
-						lon = lonMin + lonAdd
-					if lon > 179:
-						lon -= 360
-					tileArr = thisLayer.get('lats').get(lat).get(lon)
-					if row is None:
-						row = tileArr
-					else:
-						row = np.concatenate((row, tileArr), axis=1)
-				if rows is None:
-					rows = row
+		# arrange tiles
+		rows = None
+		for lat in range(latMax, latMin-1, -1):
+			row = None
+			for lonAdd in range(0, longitudeDistance(lonMin, lonMax) + 1):
+				if lonMin < 0 and lonMax > 0:
+					lon = lonMax + lonAdd
 				else:
-					rows = np.concatenate((rows, row), axis=0)
-			outLayers[layer] = rows
-		return outLayers
+					lon = lonMin + lonAdd
+				if lon > 179:
+					lon -= 360
+				tileArr = thisLayer.get(lat).get(lon)
+				if row is None:
+					row = tileArr
+				else:
+					row = np.concatenate((row, tileArr), axis=1)
+			if rows is None:
+				rows = row
+			else:
+				rows = np.concatenate((rows, row), axis=0)
+		return rows
 
 	def downloadAndCrop(self, username, password):
 		self.username, self.password = username, password
 		# download and arrange tiles into images
 		self.download()
-		self.layers = self.arrangeTiles()
+		self.layers = {}
+		for td in self.tileDownloads:
+			self.layers[td.layer] = True
 		for layer in self.layers.keys():
-			arr = self.layers.get(layer)
+			arr = self.arrangeTiles(layer)
 			print("{}: {}x{}, {:,} to {:,}".format(layer, arr.shape[0], arr.shape[1], arr.min(), arr.max()))
 			arr = arr[self.cropY1:self.cropY2, self.cropX1:self.cropX2]
 			print("{} cropped: {}x{}, {:,} to {:,}".format(layer, arr.shape[0], arr.shape[1], arr.min(), arr.max()))
 			self.layers[layer] = arr
 
+	def deleteDownloadedFiles(self):
+		for td in self.tileDownloads:
+			if os.path.exists(td.filepath):
+				os.remove(td.filepath)
+
 def downloadOneTile(tileDownload):
 	tileDownload.downloadWithAuth()
-	tileDownload.setStatus('extracting {:,} kB'.format(int(len(tileDownload.content) / 1024)))
-	tileDownload.extractAndRead()
-	tileDownload.setStatus('extracted {}x{} {} {:,} kB'.format(tileDownload.array.shape[1], tileDownload.array.shape[0], tileDownload.array.dtype, int((tileDownload.array.size * tileDownload.array.itemsize) / 1024)))
+	# tileDownload.extractAndRead()
 
 def allFlat(arr):
 	if arr is None:
@@ -1230,6 +1240,7 @@ while downloadCropAttempt < 20 and (arr is None or wbd_arr is None or allFlat(ar
 		downloadCompartment.downloadAndCrop(username, password)
 		arr = downloadCompartment.layers.get('elevation')
 		wbd_arr = downloadCompartment.layers.get('waterbody')
+		downloadCompartment.deleteDownloadedFiles()
 	downloadCropAttempt += 1
 
 if not args.previous:
