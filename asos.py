@@ -205,20 +205,29 @@ def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha
 	np.take(lookupColor, greyArr, axis=0, out=colorArr)
 	return colorArr
 
-def radialGradient(width, height, orientation=None):
-	x0, y0 = 0, 0
-	if width > height:
-		x0 = 1 - (width / height)
-	elif height > width:
-		y0 = 1 - (height / width)
-	if orientation is None:
-		orientation = random.randint(0, 3)
+def radialGradient(width, height, azimuth):
+	fWidth = width / min(width, height)
+	halfFW = fWidth * 0.5
+	halfExcessFW = abs(1 - fWidth) * 0.5
+	x0 = 0 - halfExcessFW
+	x1 = 1 + halfExcessFW
+	fHeight = height / min(width, height)
+	halfFH = fHeight * 0.5
+	halfExcessFH = abs(1 - fHeight) * 0.5
+	y0 = 0 - halfExcessFH
+	y1 = 1 + halfExcessFH
+	azimuthNum = round(azimuth / 45) % 8
 	xys = [
-		[x0, 1, y0, 1],
-		[1, x0, y0, 1],
-		[x0, 1, 1, y0],
-		[1, x0, 1, y0]]
-	xy = xys[orientation]
+		[x0, x1, -halfFH, halfFH], # 0
+		[x0, x1, y0, y1], # 45
+		[-halfFW, halfFW, y0, y1], # 90
+		[x1, x0, y0, y1], # 135
+		[x1, x0, -halfFH, halfFH], # 180
+		[x1, x0, y1, y0], # 225
+		[-halfFW, halfFW, y1, y0], # 270
+		[x0, x1, y1, y0]] # 315
+	xy = xys[azimuthNum]
+	print(azimuth, azimuthNum, xy)
 	X = np.linspace(xy[0], xy[1], width)[None, :]
 	Y = np.linspace(xy[2], xy[3], height)[:, None]
 	radgrad = np.sqrt(X**2 + Y**2)
@@ -259,7 +268,7 @@ def hillshadePreparations(array):
 	return slope, aspect
 
 def hillshade(array, azimuth, angle_altitude, slope=None, aspect=None):
-	azimuth = 360.0 - azimuth
+	# azimuth = 360.0 - azimuth
 	if slope is None:
 		# x, y = np.gradient(array)
 		y, x = np.gradient(array)
@@ -341,7 +350,7 @@ def plotLightLine(azimuth, width, height):
 
 def rayShadows(elevation, azimuth, angle, undersample=2):
 	startDT = datetime.datetime.now()
-	azimuth = 360 - azimuth
+	# azimuth = 360 - azimuth
 	azimuth = (azimuth + 180) % 360
 	dz = math.tan(angle * piPer180)
 	height, width = elevation.shape
@@ -393,17 +402,21 @@ def rayShadows(elevation, azimuth, angle, undersample=2):
 						light[ly, lx] = 0
 					else:
 						break
-		light[y, 0] = light[y, 1] # fake x-edge with neighbor
-	# if dy != 0:
-	# 	# fake y-edge with neighbor
-	# 	if dy > 0:
-	# 		yEdge = 0
-	# 		yNeigh = 1
-	# 	elif dy < 0:
-	# 		yEdge = height - 1
-	# 		yNeigh = height - 2
-	# 	for x in range(width):
-	# 		light[yEdge, x] = light[yNeigh, x]
+		# fake x-edges with neighbors
+		if dx > 0:
+			light[y, 0] = light[y, 1]
+		elif dx < 0:
+			light[y, width - 1] = light[y, width - 2]
+	if dy != 0:
+		# fake y-edge with neighbors
+		if dy > 0:
+			yEdge = 0
+			yNeigh = 1
+		elif dy < 0:
+			yEdge = height - 1
+			yNeigh = height - 2
+		for x in range(width):
+			light[yEdge, x] = light[yNeigh, x]
 	kernSize = (math.floor((undersample + 2) / 2) * 2) + 1
 	if undersample > 1:
 		lightResample = resize(light, dsize=(elevation.shape[1], elevation.shape[0]), interpolation=INTER_LINEAR)
@@ -948,11 +961,14 @@ class TerrainCrop:
 		directHS = (directHS * (1 - adjustedAmbi)) + (ambientHS * adjustedAmbi)
 		# Image.fromarray((directHS * 255).astype(np.uint8)).save(storageDir + '/direct_hs.tif')
 		# Image.fromarray((ambientHS * 255).astype(np.uint8)).save(storageDir + '/ambient_hs.tif')
-		# draw light/shadow map
-		lightMap = rayShadows(elevForShade, azimuth, angle, 1)
-		Image.fromarray(lightMap).save(storageDir + '/light.tif')
-		# use light/shadow map as mask for direct and ambient hillshades
-		hs = ((lightMap/255) * directHS) + ((1 - (lightMap / 255)) * ambientStrength * ambientHS)
+		if angle < 45 and not args.no_shadows:
+			# draw light/shadow map
+			lightMap = rayShadows(elevForShade, azimuth, angle, 1)
+			Image.fromarray(lightMap).save(storageDir + '/light.tif')
+			# use light/shadow map as mask for direct and ambient hillshades
+			hs = ((lightMap/255) * directHS) + ((1 - (lightMap / 255)) * ambientStrength * ambientHS)
+		else:
+			hs = directHS
 		self.hillshade = (hs * 255).astype(np.uint8)
 
 	def colorizeElevation(self, interpolation):
@@ -983,7 +999,7 @@ class TerrainCrop:
 		wbd_float = wbd_blur / 255
 		wbd_alpha = np.stack((wbd_float, wbd_float, wbd_float), axis=2)
 		# create radial gradient image
-		radgrad = radialGradient(self.waterbody.shape[1], self.waterbody.shape[0], args.water_orient)
+		radgrad = radialGradient(self.waterbody.shape[1], self.waterbody.shape[0], args.azimuth)
 		# sort water colors by lightness descending
 		waterColors.sort(reverse = True, key = lambda color: color.convert('lch-d65').l)
 		waterInterpolation = waterColors[0].interpolate(waterColors[1:], space='lab-d65')
@@ -1036,10 +1052,9 @@ class TerrainCrop:
 		self.hues = pickHues(args.hue_delta)
 		interpolation, a, b, c = highChromaGradient(self.lightnesses, self.chromas, self.hues)
 		self.colorizeElevation(interpolation)
-		azimuth = random.randint(0, 8) * 45
-		angle = random.randint(8, 25)
-		ambientStrength = random.randint(50, 85) / 100
-		self.shade(azimuth, angle, ambientStrength)
+		angle = random.randint(7, 50)
+		ambientStrength = random.randint(55, 80) / 100
+		self.shade(args.azimuth, angle, ambientStrength)
 		self.overlayShade()
 		if not args.no_water:
 			self.waterColors = pickWaterColors([a, b, c])
@@ -1058,7 +1073,6 @@ class TerrainCrop:
 			'chromas' : self.chromas,
 			'hues' : self.hues,
 			'water_colors' : wcLCH,
-			'water_orient' : args.water_orient,
 			'shadow_depth' : args.shadow_depth,
 			'shine' : args.shine}
 		return out
@@ -1087,11 +1101,11 @@ def parseArguments():
 	parser.add_argument('--previous-colors', action='store_true', default=False, help='Use previously used colors. Any additional color arguments will override those specific parts of the previously used colors.')
 	parser.add_argument('--no-water', '-w', action='store_true', default=False, help='Do not draw bodies of water.')
 	parser.add_argument('--no-shade', '-s', action='store_true', default=False, help='Do not hillshade the terrain. This leaves only gradient-mapped elevations and water bodies.')
+	parser.add_argument('--no-shadows', action='store_true', default=False, help='Do not cast shadows.')
 	parser.add_argument('--output', '-o', nargs='?', type=str, metavar='FILEPATH', help='Path to save output image. If not specified, will save to ~/a_sort_of_soup/output.png along with elevation_gradient.tif, hillshade.tif, and water.tif')
 	parser.add_argument('--coordinates', '-c', nargs=2, type=float, metavar=('LATITUDE', 'LONGITUDE'), help='Location of center of desired image in latitude longitude coordinates. If not specified, a random location will be chosen.')
 	parser.add_argument('--dimensions', '-d', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'), help='Width and height in pixels of output image. Larger images will require downloading more source tiles. Defaults to screen dimensions.')
 	parser.add_argument('--rotation', '-r', nargs='?', type=int, metavar='0-3', help='How many times 90 degrees to rotate. (0: North is up. 1: East is up. 2: South is up. 3: West is up.) If not specified, this will be chosen randomly.')
-	parser.add_argument('--water-orient', nargs='?', type=int, metavar='0-3', help='The orientation of the gradient with which bodies of water are filled.')
 	parser.add_argument('--min-lightness', nargs='?', type=float, default=5, metavar='0-100', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
 	parser.add_argument('--max-lightness', nargs='?', type=float, default=97, metavar='0-100', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
 	parser.add_argument('--min-chroma', nargs='?', type=float, default=0, metavar='0-134', help='Attempt to choose colors with at least this minimum chromaticity.')
@@ -1103,6 +1117,8 @@ def parseArguments():
 	parser.add_argument('--water-colors', nargs='+', type=int, metavar='L C H', help='Any number of colors for the gradient to fill water bodies with, formatted in a flat list of Lightness Chroma Hue triplets.')
 	parser.add_argument('--shadow-depth', nargs='?', type=float, default=1, metavar='0-1', help='Intensity of hillshade dark tones.')
 	parser.add_argument('--shine', nargs='?', type=float, default=0, metavar='0-1', help='Intensity of hillshade highlights.')
+	parser.add_argument('--azimuth', nargs='?', type=int, metavar='0-359', help='Azimuth of sunlight for hillshade and shadows (in 45-degree increments).')
+	parser.add_argument('--altitude-angle', nargs='?', type=int, metavar='1-90', help='Altitude angle of sunlight for hillshade and shadows (in degrees).')
 	return parser.parse_args()
 
 args = parseArguments()
@@ -1117,8 +1133,10 @@ if args.previous_colors and os.path.exists(storageDir + '/previous-colors.json')
 
 if args.hue_delta is None:
 	args.hue_delta = random.randint(20, 40)
-if args.water_orient is None:
-	args.water_orient = random.randint(0, 3)
+if args.azimuth is None:
+	args.azimuth = random.randint(0, 7) * 45
+else:
+	args.azimuth = round(args.azimuth / 45) * 45
 
 if not os.path.exists(storageDir):
 	os.makedirs(storageDir)
