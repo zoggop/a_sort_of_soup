@@ -900,6 +900,7 @@ class TerrainCrop:
 	shaded_color_elev = None
 	color_map_with_waterbody = None
 	rgba_waterbody = None
+	light_map = None
 
 	def __init__(self, elevation, waterbody, preRotatedWidth, preRotatedHeight, rotation, metersPerPixelAfterResize):
 		self.elevation = elevation.astype(np.single)
@@ -970,6 +971,7 @@ class TerrainCrop:
 		if angle < 45 and not args.no_shadows:
 			# draw light/shadow map
 			lightMap = rayShadows(elevForShade, azimuth, angle, 1)
+			self.light_map = lightMap
 			Image.fromarray(lightMap).save(storageDir + '/light.tif')
 			# use light/shadow map as mask for direct and ambient hillshades
 			hs = ((lightMap/255) * directHS) + ((1 - (lightMap / 255)) * ambientStrength * ambientHS)
@@ -1012,6 +1014,14 @@ class TerrainCrop:
 		steps = math.ceil(math.sqrt((min(*self.waterbody.shape) ** 2) * 2))
 		wbd_radgrad = arrayColorizeWithInterpolation(radgrad, waterInterpolation, steps, False, True)
 		wbd_radgrad = randomDitherImage(wbd_radgrad)
+		if not self.light_map is None:
+			# cast shadows on water
+			lm = np.stack((self.light_map, self.light_map, self.light_map), axis=2)
+			# lm = ((lm / 255) * (1 - args.ambient_strength)) + args.ambient_strength
+			# wbd_radgrad = wbd_radgrad * lm
+			lm = (lm * 0.5 * (1 - args.ambient_strength)) + (args.ambient_strength * 127)
+			lm = lm.astype(np.uint8)
+			wbd_radgrad = overlayImages(wbd_radgrad, lm)
 		# superimpose radial gradient with waterbody alpha
 		self.color_map_with_waterbody = ( (wbd_radgrad * wbd_alpha) + (bottomLayer * (1 - wbd_alpha)) ).astype(np.uint8)
 		if args.output is None:
