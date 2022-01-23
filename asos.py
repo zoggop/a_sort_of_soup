@@ -205,17 +205,22 @@ def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha
 	np.take(lookupColor, greyArr, axis=0, out=colorArr)
 	return colorArr
 
-def radialGradient(width, height, azimuth):
+def radialGradient(width, height, azimuth, angle):
 	fWidth = width / min(width, height)
 	halfFW = fWidth * 0.5
 	halfExcessFW = abs(1 - fWidth) * 0.5
+	centerWeight = angle / 90
 	x0 = 0 - halfExcessFW
 	x1 = 1 + halfExcessFW
+	x0 = (x0 * (1-centerWeight)) - (halfFW * centerWeight)
+	x1 = (x1 * (1-centerWeight)) + (halfFW * centerWeight)
 	fHeight = height / min(width, height)
 	halfFH = fHeight * 0.5
 	halfExcessFH = abs(1 - fHeight) * 0.5
 	y0 = 0 - halfExcessFH
 	y1 = 1 + halfExcessFH
+	y0 = (y0 * (1-centerWeight)) - (halfFH * centerWeight)
+	y1 = (y1 * (1-centerWeight)) + (halfFH * centerWeight)
 	azimuthNum = round(azimuth / 45) % 8
 	xys = [
 		[x0, x1, -halfFH, halfFH], # 0
@@ -227,7 +232,8 @@ def radialGradient(width, height, azimuth):
 		[-halfFW, halfFW, y1, y0], # 270
 		[x0, x1, y1, y0]] # 315
 	xy = xys[azimuthNum]
-	print(azimuth, azimuthNum, xy)
+	print(azimuth, azimuthNum, angle, centerWeight)
+	print(xy)
 	X = np.linspace(xy[0], xy[1], width)[None, :]
 	Y = np.linspace(xy[2], xy[3], height)[:, None]
 	radgrad = np.sqrt(X**2 + Y**2)
@@ -999,7 +1005,7 @@ class TerrainCrop:
 		wbd_float = wbd_blur / 255
 		wbd_alpha = np.stack((wbd_float, wbd_float, wbd_float), axis=2)
 		# create radial gradient image
-		radgrad = radialGradient(self.waterbody.shape[1], self.waterbody.shape[0], args.azimuth)
+		radgrad = radialGradient(self.waterbody.shape[1], self.waterbody.shape[0], args.azimuth, args.altitude_angle)
 		# sort water colors by lightness descending
 		waterColors.sort(reverse = True, key = lambda color: color.convert('lch-d65').l)
 		waterInterpolation = waterColors[0].interpolate(waterColors[1:], space='lab-d65')
@@ -1052,9 +1058,7 @@ class TerrainCrop:
 		self.hues = pickHues(args.hue_delta)
 		interpolation, a, b, c = highChromaGradient(self.lightnesses, self.chromas, self.hues)
 		self.colorizeElevation(interpolation)
-		angle = random.randint(7, 50)
-		ambientStrength = random.randint(55, 80) / 100
-		self.shade(args.azimuth, angle, ambientStrength)
+		self.shade(args.azimuth, args.altitude_angle, args.ambient_strength)
 		self.overlayShade()
 		if not args.no_water:
 			self.waterColors = pickWaterColors([a, b, c])
@@ -1119,6 +1123,7 @@ def parseArguments():
 	parser.add_argument('--shine', nargs='?', type=float, default=0, metavar='0-1', help='Intensity of hillshade highlights.')
 	parser.add_argument('--azimuth', nargs='?', type=int, metavar='0-359', help='Azimuth of sunlight for hillshade and shadows (in 45-degree increments).')
 	parser.add_argument('--altitude-angle', nargs='?', type=int, metavar='1-90', help='Altitude angle of sunlight for hillshade and shadows (in degrees).')
+	parser.add_argument('--ambient-strength', nargs='?', type=float, metavar='0-1', help='Strength of diffuse light in hillshade, and inverse of the darkness of cast shadows.')
 	return parser.parse_args()
 
 args = parseArguments()
@@ -1136,7 +1141,11 @@ if args.hue_delta is None:
 if args.azimuth is None:
 	args.azimuth = random.randint(0, 7) * 45
 else:
-	args.azimuth = round(args.azimuth / 45) * 45
+	args.azimuth = (round(args.azimuth / 45) % 8) * 45
+if args.altitude_angle is None:
+	args.altitude_angle = random.randint(7, 50)
+if args.ambient_strength is None:
+	args.ambient_strength = random.randint(55, 80) / 100
 
 if not os.path.exists(storageDir):
 	os.makedirs(storageDir)
