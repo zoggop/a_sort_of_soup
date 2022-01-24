@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 import concurrent.futures
 from screeninfo import get_monitors
 import datetime
+from skimage.color import rgb2lab, lab2rgb
 
 # local modules
 import catacomb
@@ -94,12 +95,6 @@ def xyMultAtLatLon(latitude, longitude, size=1):
 		xMult = 0.5
 		yMult = yMult / 2
 	return xMult, yMult, xMeters, yMeters
-
-def asInt(intStr):
-	try:
-		return int(intStr)
-	except:
-		return None
 
 def perceptuallyUniformRandomHue():
 	return random.choice(perceptualHues)
@@ -232,24 +227,44 @@ def radialGradient(width, height, azimuth, angle):
 		[-halfFW, halfFW, y1, y0], # 270
 		[x0, x1, y1, y0]] # 315
 	xy = xys[azimuthNum]
-	print(azimuth, azimuthNum, angle, centerWeight)
-	print(xy)
+	# print(azimuth, azimuthNum, angle, centerWeight)
+	# print(xy)
 	X = np.linspace(xy[0], xy[1], width)[None, :]
 	Y = np.linspace(xy[2], xy[3], height)[:, None]
 	radgrad = np.sqrt(X**2 + Y**2)
 	radgrad = np.clip(0,1,radgrad)
 	return radgrad
 
-def overlayImages(a, b):
-	# overlay two RGB images
-	a = a.astype(float) / 255
-	b = b.astype(float) / 255 # make float on range 0-1
-	mask = a >= 0.5 # generate boolean mask of everywhere a > 0.5 
+def hardLightOrOverlayFloat(a, b, overlay=False):
+	# generate boolean mask
+	if overlay:
+		mask = a >= 0.5
+	else:
+		mask = b >= 0.5
 	ab = np.zeros_like(a) # generate an output container for the blended image 
 	# now do the blending 
-	ab[~mask] = (2 * a * b)[~mask] # 2ab everywhere a < 0.5
+	ab[~mask] = (2 * a * b)[~mask] # 2ab everywhere b < 0.5
 	ab[mask] = (1 - 2 * (1 - a) * (1 - b))[mask] # else this
-	return (ab * 255).astype(np.uint8)
+	return ab
+
+def lightLAB(aRGB, b, glow):
+	# aRGB is three-channel, b is one-channel
+	aLab = rgb2lab(aRGB)
+	a = aLab[:,:,0] / 100 # extract lightness to range 0-1
+	b = b.astype(float) / 255 # make float on range 0-1
+	# apply and mix hard light and overlay using glow as overlay opacity
+	if glow == 0:
+		ab = hardLightOrOverlayFloat(a, b)
+	elif glow == 1:
+		ab = hardLightOrOverlayFloat(a, b, True)
+	else:
+		abHard = hardLightOrOverlayFloat(a, b)
+		abOver = hardLightOrOverlayFloat(a, b, True)
+		ab = (glow * abOver) + ((1 - glow) * abHard)
+	# use the blended lightness channel
+	newLab = np.stack((ab * 100, aLab[:,:,1], aLab[:,:,2]), axis=2)
+	newRgb = lab2rgb(newLab)
+	return (newRgb * 255).astype(np.uint8)
 
 def image_histogram_equalization(image, number_bins=65536):
 	# from http://www.janeriksolem.net/histogram-equalization-with-python-and.html
@@ -296,9 +311,13 @@ def multiHillshade(shades, elevForShade):
 		shade = shades[si]
 		hsLayer = hillshade(elevForShade, shade[0], shade[1], slopeForShade, aspectForShade)
 		# Image.fromarray((hsLayer*255).astype(np.uint8)).save(storageDir + '/hs-{}-{}.tif'.format(*shade))
-		opacity = shade[2] or (shade[1] / 90)
+		if len(shade) > 2:
+			opacity = shade[2]
+		else:
+			opacity =  shade[1] / 90
 		hs = (hsLayer * opacity) + (hs * (1 - opacity))
-	hs -= (hs.min() * args.shadow_depth) # deepen shadows
+	depth = 0.25 + (args.glow * 0.5)
+	hs -= (hs.min() * depth) # deepen shadows
 	hs = hs * (0.5 / np.median(hs)) # move median to center value
 	if args.shine > 0:
 		# add shininess
@@ -330,7 +349,7 @@ def plotLine(sy, width):
 def plotLightLine(azimuth, width, height):
 	dx = max(-1, min(1, 1 - (2 * math.ceil(math.cos(azimuth * piPer180)))))
 	dy = dx * math.tan(azimuth * piPer180)
-	print(azimuth, dx, dy)
+	# print(azimuth, dx, dy)
 	isYline = False
 	if abs(dy) > 1:
 		isYline = True
@@ -352,7 +371,7 @@ def rayShadows(elevation, azimuth, angle, undersample=2):
 	XYline, isYline, dx, dy = plotLightLine(azimuth, width, height)
 	# dz *= math.sqrt((dx*dx) + (dy*dy))
 	twoRootDZ = math.sqrt(2) * dz
-	print(dx, dy, dz, isYline)
+	# print(dx, dy, dz, isYline)
 	if undersample > 1:
 		elev = resize(elevation, dsize=(width, height), interpolation=INTER_LINEAR)
 	else:
@@ -777,7 +796,6 @@ def fractionAboveLevel(arr, level=None):
 	return fraction
 
 def pickHues(hueDeltaE):
-	print("hue Delta-E:", hueDeltaE)
 	ah, bh, ch = None, None, None
 	if not args.hues is None:
 		if args.hues[0] > -1:
@@ -944,7 +962,6 @@ class TerrainCrop:
 		print("rotated", self.elevation.shape, arr.min(), arr.max())
 
 	def shade(self, azimuth=135, angle=45, ambientStrength=0.67):
-		print(azimuth, angle, ambientStrength)
 		if args.no_shade:
 			return
 		# process elevation map for hillshading
@@ -954,25 +971,35 @@ class TerrainCrop:
 		directShades = [
 			[azimuth, angle, 1],
 		]
-		aFromUp = 90 - angle
-		ambientShades = [
-			[0, 90, 0.3],
-			[(azimuth + 20) % 360, 90 - (aFromUp / 5), 0.60],
-			[(azimuth + 45) % 360, 90 - (aFromUp / 4), 0.55],
-			[(azimuth - 60) % 360, 90 - (aFromUp / 3), 0.50],
-		]
+		if angle > 70:
+			ambientShades = [
+				[0, 90, 1],
+			]
+		elif angle > 50:
+			ambientShades = [
+				[(azimuth + 20) % 360, 90, 0.70],
+				[(azimuth + 45) % 360, 82, 0.60],
+				[(azimuth - 60) % 360, 75, 0.50],
+			]
+		else:
+			ambientShades = [
+				[(azimuth + 20) % 360, 70, 0.70],
+				[(azimuth + 45) % 360, 62, 0.60],
+				[(azimuth - 60) % 360, 55, 0.50],
+			]
+		print(ambientShades)
 		directHS = multiHillshade(directShades, elevForShade)
 		ambientHS = multiHillshade(ambientShades, elevForShade)
+		# Image.fromarray((directHS * 255).astype(np.uint8)).save(storageDir + '/hs-direct.tif')
+		# Image.fromarray((ambientHS * 255).astype(np.uint8)).save(storageDir + '/hs-ambient.tif')
 		# mix some of ambient into direct
-		adjustedAmbi = ambientStrength * 0.67
+		adjustedAmbi = ambientStrength * 0.834
 		directHS = (directHS * (1 - adjustedAmbi)) + (ambientHS * adjustedAmbi)
-		# Image.fromarray((directHS * 255).astype(np.uint8)).save(storageDir + '/direct_hs.tif')
-		# Image.fromarray((ambientHS * 255).astype(np.uint8)).save(storageDir + '/ambient_hs.tif')
+		# Image.fromarray((directHS * 255).astype(np.uint8)).save(storageDir + '/hs-dblend.tif')
 		if not args.no_shadows and ambientStrength < 1 and angle < 45:
 			# draw light/shadow map
 			lightMap = rayShadows(elevForShade, azimuth, angle, 1)
 			self.light_map = lightMap
-			Image.fromarray(lightMap).save(storageDir + '/light.tif')
 			# use light/shadow map as mask for direct and ambient hillshades
 			hs = ((lightMap/255) * directHS) + ((1 - (lightMap / 255)) * ambientStrength * ambientHS)
 		else:
@@ -992,8 +1019,7 @@ class TerrainCrop:
 		# blend colorized elevation with hillshade using overlay
 		if args.no_shade or self.hillshade is None:
 			return
-		hs_arr = np.stack((self.hillshade, self.hillshade, self.hillshade), axis=2) # convert hillshade to RGB
-		self.shaded_color_elev = overlayImages(self.color_elev, hs_arr)
+		self.shaded_color_elev = lightLAB(self.color_elev, self.hillshade, args.glow)
 
 	def superimposeWaterbody(self, waterColors):
 		if args.no_water or self.waterbody is None:
@@ -1016,12 +1042,8 @@ class TerrainCrop:
 		wbd_radgrad = randomDitherImage(wbd_radgrad)
 		if not self.light_map is None:
 			# cast shadows on water
-			lm = np.stack((self.light_map, self.light_map, self.light_map), axis=2)
-			# lm = ((lm / 255) * (1 - args.ambient_strength)) + args.ambient_strength
-			# wbd_radgrad = wbd_radgrad * lm
-			lm = (lm * 0.5 * (1 - args.ambient_strength)) + (args.ambient_strength * 127)
-			lm = lm.astype(np.uint8)
-			wbd_radgrad = overlayImages(wbd_radgrad, lm)
+			lm = (self.light_map * 0.5 * (1 - args.ambient_strength)) + (args.ambient_strength * 127)
+			wbd_radgrad = lightLAB(wbd_radgrad, lm, args.glow)
 		# superimpose radial gradient with waterbody alpha
 		self.color_map_with_waterbody = ( (wbd_radgrad * wbd_alpha) + (bottomLayer * (1 - wbd_alpha)) ).astype(np.uint8)
 		if args.output is None:
@@ -1053,6 +1075,9 @@ class TerrainCrop:
 			if not args.no_water and not self.rgba_waterbody is None:
 				Image.fromarray(self.rgba_waterbody).save(storageDir + '/water.tif')
 				print('saved', storageDir + '/water.tif')
+			if not args.no_shadows and not self.light_map is None:
+				Image.fromarray(self.light_map).save(storageDir + '/light.tif')
+				print('saved', storageDir + '/light.tif')
 			Image.fromarray(self.color_elev).save(storageDir + '/elevation_gradient.tif')
 			print('saved', storageDir + '/elevation_gradient.tif')
 			final_img.save(storageDir + '/output.png')
@@ -1092,7 +1117,7 @@ class TerrainCrop:
 	def lightDict(self):
 		# output dictionary of color information
 		out = {
-			'shadow_depth' : args.shadow_depth,
+			'glow' : args.glow,
 			'shine' : args.shine,
 			'azimuth' : args.azimuth,
 			'altitude_angle' : args.altitude_angle,
@@ -1138,8 +1163,8 @@ def parseArguments():
 	parser.add_argument('--chromas', nargs='+', type=int, metavar='0-134', help='Up to three chromaticities, in order of elevation. The remaining chromas will be chosen randomly. To specify only the second and/or third chromaticities, enter chromaticities of -1 to have them chosen randomly.')
 	parser.add_argument('--hues', nargs='+', type=int, metavar='0-359', help='Up to three hues, in order of elevation. The remaining hues will be chosen randomly. To specify only the second and/or third hue, enter hues of -1 to have them chosen randomly.')
 	parser.add_argument('--water-colors', nargs='+', type=int, metavar='L C H', help='Any number of colors for the gradient to fill water bodies with, formatted in a flat list of Lightness Chroma Hue triplets.')
-	parser.add_argument('--shadow-depth', nargs='?', type=float, default=1, metavar='0-1', help='Intensity of hillshade dark tones.')
-	parser.add_argument('--shine', nargs='?', type=float, default=0, metavar='0-1', help='Intensity of hillshade highlights.')
+	parser.add_argument('--shine', nargs='?', type=float, metavar='0-1', help='Intensity of hillshade highlights.')
+	parser.add_argument('--glow', nargs='?', type=float, metavar='0-1', help='Opacity of overlay and transparency of hard light blending of hillshade.')
 	parser.add_argument('--azimuth', nargs='?', type=int, metavar='0-359', help='Azimuth of sunlight for hillshade and shadows (in 45-degree increments).')
 	parser.add_argument('--altitude-angle', nargs='?', type=int, metavar='1-90', help='Altitude angle of sunlight for hillshade and shadows (in degrees).')
 	parser.add_argument('--ambient-strength', nargs='?', type=float, metavar='0-1', help='Strength of diffuse light in hillshade, and inverse of the darkness of cast shadows.')
@@ -1164,6 +1189,12 @@ if args.previous_light and os.path.exists(storageDir + '/previous-light.json'):
 
 if args.hue_delta is None:
 	args.hue_delta = random.randint(20, 40)
+if args.shine is None:
+	args.shine = random.random() * random.random() * random.random()
+	if args.shine < 0.05:
+		args.shine = 0
+if args.glow is None:
+	args.glow = random.random() * random.random()
 if args.azimuth is None:
 	args.azimuth = random.randint(0, 7) * 45
 else:
@@ -1171,7 +1202,17 @@ else:
 if args.altitude_angle is None:
 	args.altitude_angle = random.randint(7, 45)
 if args.ambient_strength is None:
-	args.ambient_strength = random.randint(55, 80) / 100
+	args.ambient_strength = 0.65 + (random.random() * random.random() * 0.35)
+
+reportString = ''
+for name in ['hue_delta', 'shine', 'glow', 'azimuth', 'altitude_angle', 'ambient_strength']:
+	nameConv = name.replace('_', '-')
+	val = getattr(args, name)
+	if val > 0 and abs(val) < 1:
+		reportString += ' --{} {:.2f}'.format(nameConv, val)
+	else:
+		reportString += ' --{} {}'.format(nameConv, val)
+print(reportString)
 
 if not os.path.exists(storageDir):
 	os.makedirs(storageDir)
