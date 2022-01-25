@@ -11,12 +11,13 @@ from io import BytesIO
 import random
 import sys
 import json
-from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT, medianBlur
 from bs4 import BeautifulSoup
 import concurrent.futures
 from screeninfo import get_monitors
 import datetime
 from skimage.color import rgb2lab, lab2rgb
+from skimage.transform import resize
+from skimage.filters import gaussian, median
 
 # local modules
 import catacomb
@@ -373,7 +374,7 @@ def rayShadows(elevation, azimuth, angle, undersample=2):
 	twoRootDZ = math.sqrt(2) * dz
 	# print(dx, dy, dz, isYline)
 	if undersample > 1:
-		elev = resize(elevation, dsize=(width, height), interpolation=INTER_LINEAR)
+		elev = resize(elevation, (height, width), preserve_range=True, mode='edge')
 	else:
 		elev = elevation
 	elev = elev / undersample
@@ -431,11 +432,11 @@ def rayShadows(elevation, azimuth, angle, undersample=2):
 			light[yEdge, x] = light[yNeigh, x]
 	kernSize = (math.floor((undersample + 2) / 2) * 2) + 1
 	if undersample > 1:
-		lightResample = resize(light, dsize=(elevation.shape[1], elevation.shape[0]), interpolation=INTER_LINEAR)
-		lightResample = medianBlur(lightResample, kernSize)
+		lightResample = resize(light, elevation.shape, preserve_range=True, mode='edge')
+		# lightResample = medianBlur(lightResample, kernSize)
 	else:
 		lightResample = light
-	lightResample = GaussianBlur(lightResample, (kernSize, kernSize), BORDER_DEFAULT)
+	lightResample = gaussian(lightResample, sigma=kernSize/4, preserve_range=True).astype(np.uint8)
 	print("ray shadows", datetime.datetime.now() - startDT)
 	return lightResample
 
@@ -946,11 +947,12 @@ class TerrainCrop:
 
 	def stretch(self):
 		# stretch elevation and waterbody data
-		self.elevation = resize(self.elevation, dsize=(self.preRotatedWidth, self.preRotatedHeight), interpolation=INTER_LINEAR)
-		print("resized", self.elevation.shape, arr.min(), arr.max())
+		print("before resize", self.elevation.shape, self.elevation.min(), self.elevation.max())
+		self.elevation = resize(self.elevation, (self.preRotatedHeight, self.preRotatedWidth), preserve_range=True, mode='edge')
+		print("resized", self.elevation.shape, self.elevation.min(), self.elevation.max())
 		if self.waterbody is None:
 			return
-		self.waterbody = resize(autocontrastedUint8(self.waterbody), dsize=(self.preRotatedWidth, self.preRotatedHeight), interpolation=INTER_LINEAR)
+		self.waterbody = resize(autocontrastedUint8(self.waterbody), (self.preRotatedHeight, self.preRotatedWidth), preserve_range=True).astype(np.uint8)
 
 	def rotate(self):
 		# rotate elevation and waterbody data
@@ -1029,7 +1031,7 @@ class TerrainCrop:
 			bottomLayer = self.color_elev
 		# de-alias waterbody image and create alpha
 		wbd_blur = self.waterbody # medianBlur(self.waterbody, 3)
-		wbd_blur = GaussianBlur(wbd_blur, (3,3), 0.5, 0.5, BORDER_DEFAULT)
+		wbd_blur = gaussian(wbd_blur, sigma=0.67, preserve_range=True).astype(np.uint8)
 		wbd_float = wbd_blur / 255
 		wbd_alpha = np.stack((wbd_float, wbd_float, wbd_float), axis=2)
 		# create radial gradient image
