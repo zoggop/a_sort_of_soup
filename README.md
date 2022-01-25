@@ -17,11 +17,7 @@ This is a python script that downloads a digital elevation model of a random loc
 
 - [Pillow](https://python-pillow.org/)
 
-- [opencv-python](https://pypi.org/project/opencv-python/)
-
 - [skimage](https://scikit-image.org/)
-
-- [beautifulsoup4](https://pypi.org/project/beautifulsoup4/)
 
 - [screeninfo](https://pypi.org/project/screeninfo/)
 

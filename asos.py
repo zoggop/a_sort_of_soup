@@ -11,7 +11,6 @@ from io import BytesIO
 import random
 import sys
 import json
-from bs4 import BeautifulSoup
 import concurrent.futures
 from screeninfo import get_monitors
 import datetime
@@ -488,6 +487,7 @@ def printDownloadStatus(tileDownloads, overwrite=True):
 	StatusPrintLock = False
 
 def listFD(url, ext=''):
+	from bs4 import BeautifulSoup
 	response = requests.get(url)
 	if response.status_code != 200:
 		return []
