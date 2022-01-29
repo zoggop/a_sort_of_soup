@@ -14,7 +14,6 @@ import json
 from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT, medianBlur, cvtColor, COLOR_RGB2Lab, COLOR_Lab2RGB
 import concurrent.futures
 from screeninfo import get_monitors
-import datetime
 from numba import jit
 from numba.types import uint8, float32, int8, boolean, int64, float64
 
@@ -164,7 +163,8 @@ def randomDitherValue(v):
 # dither a 0-1 float image to a 0-255 integer image
 def randomDitherImage(arr):
 	vectorRandDithVal = np.vectorize(randomDitherValue)
-	return vectorRandDithVal(arr).astype(np.uint8)
+	dithered = vectorRandDithVal(arr).astype(np.uint8)
+	return dithered
 
 def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha=False, floatChannels=False):
 	if numColors is None:
@@ -433,7 +433,6 @@ def shadowLoop(elev, light, XYline, isYline, dx, dy, dz, twoRootDZ):
 	return light
 
 def rayShadows(elevation, azimuth, angle, undersample=2):
-	startDT = datetime.datetime.now()
 	# azimuth = 360 - azimuth
 	azimuth = (azimuth + 180) % 360
 	dz = math.tan(angle * piPer180)
@@ -458,7 +457,6 @@ def rayShadows(elevation, azimuth, angle, undersample=2):
 	else:
 		lightResample = light
 	lightResample = GaussianBlur(lightResample, (kernSize, kernSize), BORDER_DEFAULT)
-	print("ray shadows", datetime.datetime.now() - startDT)
 	return lightResample
 
 def autocontrast(arr, maxValue):

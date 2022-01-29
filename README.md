@@ -19,9 +19,7 @@ This is a python script that downloads a digital elevation model of a random loc
 
 - [opencv-python](https://pypi.org/project/opencv-python/)
 
-- [skimage](https://scikit-image.org/)
-
-- [beautifulsoup4](https://pypi.org/project/beautifulsoup4/)
+- [numba](https://numba.pydata.org/)
 
 - [screeninfo](https://pypi.org/project/screeninfo/)
 
