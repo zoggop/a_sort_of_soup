@@ -15,6 +15,8 @@ from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT, medianBlur, 
 import concurrent.futures
 from screeninfo import get_monitors
 import datetime
+from numba import jit
+from numba.types import uint8, float32, int8, boolean, int64, float64
 
 # local modules
 import catacomb
@@ -358,60 +360,61 @@ def plotLightLine(azimuth, width, height):
 		line = plotLine(dy, width)
 	return line, isYline, dx, dy
 
-def rayShadows(elevation, azimuth, angle, undersample=2):
-	startDT = datetime.datetime.now()
-	# azimuth = 360 - azimuth
-	azimuth = (azimuth + 180) % 360
-	dz = math.tan(angle * piPer180)
-	height, width = elevation.shape
-	height = round(height / undersample)
-	width = round(width / undersample)
-	XYline, isYline, dx, dy = plotLightLine(azimuth, width, height)
-	# dz *= math.sqrt((dx*dx) + (dy*dy))
-	twoRootDZ = math.sqrt(2) * dz
-	# print(dx, dy, dz, isYline)
-	if undersample > 1:
-		elev = resize(elevation, dsize=(width, height), interpolation=INTER_LINEAR)
-	else:
-		elev = elevation
-	elev = elev / undersample
-	light = np.full((height, width), 255, dtype=np.uint8)
-	for y in range(height):
-		for x in range(width):
-			if light[y, x] == 255:
-				z = elev[y, x]
-				lx, ly, lz = x, y, z
-				if isYline:
-					if dy == -1:
-						run = range(y - 1, -1, -1)
-					else:
-						run = range(y + 1, height)
-				else:
-					if dx == -1:
-						run = range(x - 1, -1, -1)
-					else:
-						run = range(x + 1, width)
-				for li in run:
-					change = XYline[li]
-					if isYline:
-						ly = li
+@jit(uint8[:,:](float32[:,:], uint8[:,:], int8[:], boolean, int64, int64, float64, float64), nopython=True)
+def shadowLoop(elev, light, XYline, isYline, dx, dy, dz, twoRootDZ):
+	height, width = elev.shape
+	if isYline:
+		if dy == -1:
+			lyStop = -1
+		else:
+			lyStop = height
+		for y in range(height):
+			for x in range(width):
+				if light[y, x] == 255:
+					z = elev[y, x]
+					lx, lz = x, z
+					ly = y + dy
+					while ly != lyStop:
+						change = XYline[ly]
 						lx += change
 						if lx < 0 or lx > width - 1:
 							break
-					else:
-						lx = li
+						if change != 0:
+							lz -= twoRootDZ
+						else:
+							lz -= dz
+						tz = elev[ly, lx]
+						if lz > tz:
+							light[ly, lx] = 0
+						else:
+							break
+						ly += dy
+	else:
+		if dx == -1:
+			lxStop = -1
+		else:
+			lxStop = width
+		for y in range(height):
+			for x in range(width):
+				if light[y, x] == 255:
+					z = elev[y, x]
+					ly, lz = y, z
+					lx = x + dx
+					while lx != lxStop:
+						change = XYline[lx]
 						ly += change
 						if ly < 0 or ly > height - 1:
 							break
-					if change != 0:
-						lz -= twoRootDZ
-					else:
-						lz -= dz
-					tz = elev[ly, lx]
-					if lz > tz:
-						light[ly, lx] = 0
-					else:
-						break
+						if change != 0:
+							lz -= twoRootDZ
+						else:
+							lz -= dz
+						tz = elev[ly, lx]
+						if lz > tz:
+							light[ly, lx] = 0
+						else:
+							break
+						lx += dx
 		# fake x-edges with neighbors
 		if dx > 0:
 			light[y, 0] = light[y, 1]
@@ -427,6 +430,27 @@ def rayShadows(elevation, azimuth, angle, undersample=2):
 			yNeigh = height - 2
 		for x in range(width):
 			light[yEdge, x] = light[yNeigh, x]
+	return light
+
+def rayShadows(elevation, azimuth, angle, undersample=2):
+	startDT = datetime.datetime.now()
+	# azimuth = 360 - azimuth
+	azimuth = (azimuth + 180) % 360
+	dz = math.tan(angle * piPer180)
+	height, width = elevation.shape
+	height = round(height / undersample)
+	width = round(width / undersample)
+	XYline, isYline, dx, dy = plotLightLine(azimuth, width, height)
+	# dz *= math.sqrt((dx*dx) + (dy*dy))
+	# print(dx, dy, dz, isYline)
+	if undersample > 1:
+		elev = resize(elevation, dsize=(width, height), interpolation=INTER_LINEAR)
+	else:
+		elev = elevation
+	elev = elev / undersample
+	light = np.full((height, width), 255, dtype=np.uint8)
+	twoRootDZ = math.sqrt(2) * dz
+	light = shadowLoop(elev, light, np.array(XYline, dtype=np.int8), isYline, int(dx), int(dy), dz, twoRootDZ)
 	kernSize = (math.floor((undersample + 2) / 2) * 2) + 1
 	if undersample > 1:
 		lightResample = resize(light, dsize=(elevation.shape[1], elevation.shape[0]), interpolation=INTER_LINEAR)
