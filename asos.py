@@ -17,6 +17,7 @@ import datetime
 from skimage.color import rgb2lab, lab2rgb
 from skimage.transform import resize
 from skimage.filters import gaussian, median
+from cv2 import cvtColor, COLOR_RGB2Lab, COLOR_Lab2RGB
 
 # local modules
 import catacomb
@@ -249,8 +250,12 @@ def hardLightOrOverlayFloat(a, b, overlay=False):
 
 def lightLAB(aRGB, b, glow):
 	# aRGB is three-channel, b is one-channel
-	aLab = rgb2lab(aRGB)
+	# aLab = rgb2lab(aRGB)
+	aLab = cvtColor((aRGB / 255).astype(np.single), COLOR_RGB2Lab)
+	print(aLab.min(), aLab.max())
+	# a = aLab[:,:,0] / 100 # extract lightness to range 0-1
 	a = aLab[:,:,0] / 100 # extract lightness to range 0-1
+	print(a.min(), a.max())
 	b = b.astype(float) / 255 # make float on range 0-1
 	# apply and mix hard light and overlay using glow as overlay opacity
 	if glow == 0:
@@ -263,8 +268,9 @@ def lightLAB(aRGB, b, glow):
 		ab = (glow * abOver) + ((1 - glow) * abHard)
 	# use the blended lightness channel
 	newLab = np.stack((ab * 100, aLab[:,:,1], aLab[:,:,2]), axis=2)
-	newRgb = lab2rgb(newLab)
-	return (newRgb * 255).astype(np.uint8)
+	# newRgb = lab2rgb(newLab) * 255
+	newRgb = cvtColor(newLab.astype(np.single), COLOR_Lab2RGB) * 255
+	return newRgb.astype(np.uint8)
 
 def image_histogram_equalization(image, number_bins=65536):
 	# from http://www.janeriksolem.net/histogram-equalization-with-python-and.html
@@ -326,6 +332,7 @@ def multiHillshade(shades, elevForShade):
 	# return (hs * 255).astype(np.uint8)
 	return hs
 
+# generates a list of changes in dependent coordinate that produce a line
 def plotLine(sy, width):
 	dx = width
 	dy = round(sy * width)
@@ -378,42 +385,58 @@ def rayShadows(elevation, azimuth, angle, undersample=2):
 		elev = elevation
 	elev = elev / undersample
 	light = np.full((height, width), 255, dtype=np.uint8)
-	for y in range(height):
-		for x in range(width):
-			if light[y, x] == 255:
-				z = elev[y, x]
-				lx, ly, lz = x, y, z
-				if isYline:
-					if dy == -1:
-						run = range(y - 1, -1, -1)
-					else:
-						run = range(y + 1, height)
-				else:
-					if dx == -1:
-						run = range(x - 1, -1, -1)
-					else:
-						run = range(x + 1, width)
-				for li in run:
-					change = XYline[li]
-					if isYline:
-						ly = li
+	if isYline:
+		if dy == -1:
+			lyStop = -1
+		else:
+			lyStop = height
+		for y in range(height):
+			for x in range(width):
+				if light[y, x] == 255:
+					z = elev[y, x]
+					lx, lz = x, z
+					ly = y + dy
+					while ly != lyStop:
+						change = XYline[ly]
 						lx += change
 						if lx < 0 or lx > width - 1:
 							break
-					else:
-						lx = li
+						if change != 0:
+							lz -= twoRootDZ
+						else:
+							lz -= dz
+						tz = elev[ly, lx]
+						if lz > tz:
+							light[ly, lx] = 0
+						else:
+							break
+						ly += dy
+	else:
+		if dx == -1:
+			lxStop = -1
+		else:
+			lxStop = width
+		for y in range(height):
+			for x in range(width):
+				if light[y, x] == 255:
+					z = elev[y, x]
+					ly, lz = y, z
+					lx = x + dx
+					while lx != lxStop:
+						change = XYline[lx]
 						ly += change
 						if ly < 0 or ly > height - 1:
 							break
-					if change != 0:
-						lz -= twoRootDZ
-					else:
-						lz -= dz
-					tz = elev[ly, lx]
-					if lz > tz:
-						light[ly, lx] = 0
-					else:
-						break
+						if change != 0:
+							lz -= twoRootDZ
+						else:
+							lz -= dz
+						tz = elev[ly, lx]
+						if lz > tz:
+							light[ly, lx] = 0
+						else:
+							break
+						lx += dx
 		# fake x-edges with neighbors
 		if dx > 0:
 			light[y, 0] = light[y, 1]
