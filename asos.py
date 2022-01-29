@@ -11,12 +11,10 @@ from io import BytesIO
 import random
 import sys
 import json
-from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT, medianBlur
-from bs4 import BeautifulSoup
+from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT, medianBlur, cvtColor, COLOR_RGB2Lab, COLOR_Lab2RGB
 import concurrent.futures
 from screeninfo import get_monitors
 import datetime
-from skimage.color import rgb2lab, lab2rgb
 
 # local modules
 import catacomb
@@ -249,7 +247,7 @@ def hardLightOrOverlayFloat(a, b, overlay=False):
 
 def lightLAB(aRGB, b, glow):
 	# aRGB is three-channel, b is one-channel
-	aLab = rgb2lab(aRGB)
+	aLab = cvtColor((aRGB / 255).astype(np.single), COLOR_RGB2Lab)
 	a = aLab[:,:,0] / 100 # extract lightness to range 0-1
 	b = b.astype(float) / 255 # make float on range 0-1
 	# apply and mix hard light and overlay using glow as overlay opacity
@@ -263,8 +261,8 @@ def lightLAB(aRGB, b, glow):
 		ab = (glow * abOver) + ((1 - glow) * abHard)
 	# use the blended lightness channel
 	newLab = np.stack((ab * 100, aLab[:,:,1], aLab[:,:,2]), axis=2)
-	newRgb = lab2rgb(newLab)
-	return (newRgb * 255).astype(np.uint8)
+	newRGB = cvtColor(newLab.astype(np.single), COLOR_Lab2RGB) * 255
+	return newRGB.astype(np.uint8)
 
 def image_histogram_equalization(image, number_bins=65536):
 	# from http://www.janeriksolem.net/histogram-equalization-with-python-and.html
@@ -487,6 +485,7 @@ def printDownloadStatus(tileDownloads, overwrite=True):
 	StatusPrintLock = False
 
 def listFD(url, ext=''):
+	from bs4 import BeautifulSoup
 	response = requests.get(url)
 	if response.status_code != 200:
 		return []
