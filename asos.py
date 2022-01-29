@@ -1,6 +1,8 @@
 import os
 import argparse
 import numpy as np
+from numpy.random import default_rng
+rng = default_rng()
 from PIL import Image
 import math
 from zipfile import ZipFile
@@ -151,19 +153,17 @@ def nextHueByDeltaE(hues, targetDeltaE):
 	# print("fallback", fallbackDeltaE)
 	return fallbackHue
 
-# will be vectorized for use in randomDitherImage
-def randomDitherValue(v):
-	v255 = v * 255
-	low = math.floor(v255)
-	if random.random() > v255 - low:
-		return low
-	else:
-		return low + 1
-
 # dither a 0-1 float image to a 0-255 integer image
 def randomDitherImage(arr):
-	vectorRandDithVal = np.vectorize(randomDitherValue)
-	dithered = vectorRandDithVal(arr).astype(np.uint8)
+	r = rng.random(arr.shape)
+	v255 = arr * 255
+	low = np.floor(v255).astype(np.uint8)
+	high = np.ceil(v255).astype(np.uint8)
+	err = v255 - low
+	mask = r > err
+	dithered = np.zeros(arr.shape, dtype=np.uint8)
+	dithered[mask] = low[mask]
+	dithered[~mask] = high[~mask]
 	return dithered
 
 def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha=False, floatChannels=False):
