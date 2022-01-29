@@ -19,6 +19,8 @@ This is a python script that downloads a digital elevation model of a random loc
 
 - [skimage](https://scikit-image.org/)
 
+- [opencv-python](https://pypi.org/project/opencv-python/)
+
 - [screeninfo](https://pypi.org/project/screeninfo/)
 
 ## Usage
@@ -33,7 +35,7 @@ usage: asos.py [-h] [--new-login] [--one-time-login] [--previous]
                [--max-chroma [0-134]] [--hue-delta [Delta-E]]
                [--lightnesses 0-100 [0-100 ...]] [--chromas 0-134 [0-134 ...]]
                [--hues 0-359 [0-359 ...]] [--water-colors L C H [L C H ...]]
-               [--shine [0-1]] [--glow [0-1]] [--azimuth [0-359]]
+               [--shadow-depth [0-1]] [--shine [0-1]] [--azimuth [0-359]]
                [--altitude-angle [1-90]] [--ambient-strength [0-1]]
 
 Create a colorful image of terrain of a random location.
@@ -107,9 +109,8 @@ optional arguments:
                         Any number of colors for the gradient to fill water
                         bodies with, formatted in a flat list of Lightness
                         Chroma Hue triplets.
+  --shadow-depth [0-1]  Intensity of hillshade dark tones.
   --shine [0-1]         Intensity of hillshade highlights.
-  --glow [0-1]          Opacity of overlay and transparency of hard light
-                        blending of hillshade.
   --azimuth [0-359]     Azimuth of sunlight for hillshade and shadows (in
                         45-degree increments).
   --altitude-angle [1-90]
