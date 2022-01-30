@@ -1123,11 +1123,12 @@ class TerrainCrop:
 	def colorDict(self):
 		# output dictionary of color information
 		wcLCH = []
-		for color in self.waterColors:
-			lch = color.convert('lch-d65')
-			wcLCH.append(lch.l)
-			wcLCH.append(lch.c)
-			wcLCH.append(lch.h)
+		if not args.no_water:
+			for color in self.waterColors:
+				lch = color.convert('lch-d65')
+				wcLCH.append(lch.l)
+				wcLCH.append(lch.c)
+				wcLCH.append(lch.h)
 		out = {
 			'lightnesses' : self.lightnesses,
 			'chromas' : self.chromas,
@@ -1184,7 +1185,7 @@ def parseArguments():
 	parser.add_argument('--chromas', nargs='+', type=int, metavar='0-134', help='Up to three chromaticities, in order of elevation. The remaining chromas will be chosen randomly. To specify only the second and/or third chromaticities, enter chromaticities of -1 to have them chosen randomly.')
 	parser.add_argument('--hues', nargs='+', type=int, metavar='0-359', help='Up to three hues, in order of elevation. The remaining hues will be chosen randomly. To specify only the second and/or third hue, enter hues of -1 to have them chosen randomly.')
 	parser.add_argument('--water-colors', nargs='+', type=int, metavar='L C H', help='Any number of colors for the gradient to fill water bodies with, formatted in a flat list of Lightness Chroma Hue triplets.')
-	parser.add_argument('--shine', nargs='?', type=float, metavar='0-1', help='Intensity of hillshade highlights.')
+	parser.add_argument('--shine', nargs='?', type=float, default=0, metavar='0-1', help='Intensity of hillshade highlights.')
 	parser.add_argument('--glow', nargs='?', type=float, metavar='0-1', help='Opacity of overlay and transparency of hard light blending of hillshade.')
 	parser.add_argument('--azimuth', nargs='?', type=int, metavar='0-359', help='Azimuth of sunlight for hillshade and shadows (in 45-degree increments).')
 	parser.add_argument('--altitude-angle', nargs='?', type=int, metavar='1-90', help='Altitude angle of sunlight for hillshade and shadows (in degrees).')
@@ -1223,7 +1224,7 @@ else:
 if args.altitude_angle is None:
 	args.altitude_angle = random.randint(7, 45)
 if args.ambient_strength is None:
-	args.ambient_strength = 0.65 + (random.random() * random.random() * 0.35)
+	args.ambient_strength = 0.6 + (random.random() * random.random() * 0.4)
 
 reportString = ''
 for name in ['hue_delta', 'shine', 'glow', 'azimuth', 'altitude_angle', 'ambient_strength']:
