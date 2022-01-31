@@ -28,6 +28,7 @@ scriptDir = os.path.split(os.path.realpath(__file__))[0]
 
 StatusPrintLock = False
 
+halfPi = math.pi / 2
 piPer180 = math.pi / 180
 degreesPerTheta = 90 / (math.pi / 2)
 
@@ -458,6 +459,53 @@ def rayShadows(elevation, azimuth, angle, undersample=2):
 		lightResample = light
 	lightResample = GaussianBlur(lightResample, (kernSize, kernSize), BORDER_DEFAULT)
 	return lightResample
+
+@jit(float32[:,:](float32[:,:], int64), nopython=True)
+def skyView(elevation, radius):
+	# precompute eight lines dy, dx, and euclidean delta per segment
+	linesDY = []
+	linesDX = []
+	linesEuc = []
+	for dy in [-1, 0, 1]:
+		for dx in [-1, 0, 1]:
+			if not (dx == 0 and dy == 0):
+				linesDY.append(dy)
+				linesDX.append(dx)
+				linesEuc.append(math.sqrt(dy**2 + dx**2))
+	numLines = len(linesDY)
+	# evalulate every pixel
+	height, width = elevation.shape
+	openness = np.zeros(elevation.shape, dtype=np.single)
+	for y in range(height):
+		for x in range(width):
+			z = elevation[y, x]
+			# find occlusions along each line
+			viewSum = numLines
+			for i in range(numLines):
+				dy, dx = linesDY[i], linesDX[i]
+				eucDelta = linesEuc[i]
+				ly, lx = y, x
+				dist = 0
+				highZ = z
+				occlusion = 0
+				for r in range(radius):
+					ly += dy
+					if ly < 0 or ly >= height:
+						break
+					lx += dx
+					if lx < 0 or lx >= width:
+						break
+					dist += eucDelta
+					lz = elevation[ly, lx]
+					if lz > highZ:
+						highZ = lz
+						slope = (lz - z) / dist
+						angle = math.atan(slope)
+						occlusion = angle / halfPi
+				viewSum -= occlusion
+			openness[y, x] = viewSum
+	openness /= numLines
+	return openness
 
 def autocontrast(arr, maxValue):
 	mult = maxValue / (arr.max() - arr.min())
@@ -988,6 +1036,9 @@ class TerrainCrop:
 		# process elevation map for hillshading
 		elevForShade = self.elevation / self.metersPerPixelAfterResize # so that the height map's vertical units are the same as its horizontal units
 		print("for shade", elevForShade.min(), elevForShade.max())
+		openness = skyView(elevForShade, 8)
+		print(openness.min(), openness.max())
+		Image.fromarray((openness * 255).astype(np.uint8)).save(storageDir + '/openness.tif')
 		# hillshade layers: azimuth, altitude angle, opacity
 		directShades = [
 			[azimuth, angle, 1],
