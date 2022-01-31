@@ -479,7 +479,7 @@ def skyView(elevation, radius):
 	numLines = len(linesDY)
 	# evalulate every pixel
 	height, width = elevation.shape
-	openness = np.zeros(elevation.shape, dtype=np.single)
+	view = np.zeros(elevation.shape, dtype=np.single)
 	for y in range(height):
 		for x in range(width):
 			z = elevation[y, x]
@@ -509,9 +509,9 @@ def skyView(elevation, radius):
 				if highSlope != 0:
 					occlusion = math.atan(highSlope) * oneOverHalfPi
 					viewSum -= occlusion
-			openness[y, x] = viewSum
-	openness /= numLines
-	return openness
+			view[y, x] = viewSum
+	view /= numLines
+	return view
 
 def autocontrast(arr, maxValue):
 	mult = maxValue / (arr.max() - arr.min())
@@ -1044,9 +1044,7 @@ class TerrainCrop:
 		print("for shade", elevForShade.min(), elevForShade.max())
 		# hillshade layers: azimuth, altitude angle, opacity
 		directHS = multiHillshade([[azimuth, angle, 1]], elevForShade)
-		openness = skyView(elevForShade, 16)
-		# Image.fromarray((openness * 255).astype(np.uint8)).save(storageDir + '/openness.tif')
-		ambientHS = openness * 0.5
+		ambientHS = skyView(elevForShade, 8) * 0.5
 		# Image.fromarray((directHS * 255).astype(np.uint8)).save(storageDir + '/hs-direct.tif')
 		# Image.fromarray((ambientHS * 255).astype(np.uint8)).save(storageDir + '/hs-ambient.tif')
 		# mix some of ambient into direct
