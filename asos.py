@@ -29,6 +29,7 @@ scriptDir = os.path.split(os.path.realpath(__file__))[0]
 StatusPrintLock = False
 
 halfPi = math.pi / 2
+oneOverHalfPi = 1 / halfPi
 piPer180 = math.pi / 180
 degreesPerTheta = 90 / (math.pi / 2)
 
@@ -466,12 +467,15 @@ def skyView(elevation, radius):
 	linesDY = []
 	linesDX = []
 	linesEuc = []
+	linesIterations = []
 	for dy in [-1, 0, 1]:
 		for dx in [-1, 0, 1]:
 			if not (dx == 0 and dy == 0):
 				linesDY.append(dy)
 				linesDX.append(dx)
-				linesEuc.append(math.sqrt(dy**2 + dx**2))
+				euc = math.sqrt(dy**2 + dx**2)
+				linesEuc.append(euc)
+				linesIterations.append(round(radius / euc))
 	numLines = len(linesDY)
 	# evalulate every pixel
 	height, width = elevation.shape
@@ -488,8 +492,7 @@ def skyView(elevation, radius):
 				dist = 0
 				highZ = z
 				highSlope = 0
-				occlusion = 0
-				for r in range(radius):
+				for r in range(linesIterations[i]):
 					ly += dy
 					if ly < 0 or ly >= height:
 						break
@@ -504,8 +507,7 @@ def skyView(elevation, radius):
 						if slope > highSlope:
 							highSlope = slope
 				if highSlope != 0:
-					angle = math.atan(highSlope)
-					occlusion = angle / halfPi
+					occlusion = math.atan(highSlope) * oneOverHalfPi
 					viewSum -= occlusion
 			openness[y, x] = viewSum
 	openness /= numLines
@@ -1040,36 +1042,15 @@ class TerrainCrop:
 		# process elevation map for hillshading
 		elevForShade = self.elevation / self.metersPerPixelAfterResize # so that the height map's vertical units are the same as its horizontal units
 		print("for shade", elevForShade.min(), elevForShade.max())
-		openness = skyView(elevForShade, 8)
-		print(openness.min(), openness.max())
-		Image.fromarray((openness * 255).astype(np.uint8)).save(storageDir + '/openness.tif')
 		# hillshade layers: azimuth, altitude angle, opacity
-		directShades = [
-			[azimuth, angle, 1],
-		]
-		if angle > 70:
-			ambientShades = [
-				[0, 90, 1],
-			]
-		elif angle > 50:
-			ambientShades = [
-				[(azimuth + 20) % 360, 90, 0.70],
-				[(azimuth + 45) % 360, 82, 0.60],
-				[(azimuth - 60) % 360, 75, 0.50],
-			]
-		else:
-			ambientShades = [
-				[(azimuth + 20) % 360, 70, 0.70],
-				[(azimuth + 45) % 360, 62, 0.60],
-				[(azimuth - 60) % 360, 55, 0.50],
-			]
-		print(ambientShades)
-		directHS = multiHillshade(directShades, elevForShade)
-		ambientHS = multiHillshade(ambientShades, elevForShade)
+		directHS = multiHillshade([[azimuth, angle, 1]], elevForShade)
+		openness = skyView(elevForShade, 16)
+		# Image.fromarray((openness * 255).astype(np.uint8)).save(storageDir + '/openness.tif')
+		ambientHS = openness * 0.5
 		# Image.fromarray((directHS * 255).astype(np.uint8)).save(storageDir + '/hs-direct.tif')
 		# Image.fromarray((ambientHS * 255).astype(np.uint8)).save(storageDir + '/hs-ambient.tif')
 		# mix some of ambient into direct
-		adjustedAmbi = ambientStrength * 0.834
+		adjustedAmbi = ambientStrength * 0.5
 		directHS = (directHS * (1 - adjustedAmbi)) + (ambientHS * adjustedAmbi)
 		# Image.fromarray((directHS * 255).astype(np.uint8)).save(storageDir + '/hs-dblend.tif')
 		if not args.no_shadows and ambientStrength < 1 and angle < 45:
@@ -1273,13 +1254,13 @@ if args.shine is None:
 if args.glow is None:
 	args.glow = random.random() * random.random()
 if args.azimuth is None:
-	args.azimuth = random.randint(0, 7) * 45
+	args.azimuth = random.randint(0, 4) * 45
 else:
 	args.azimuth = (round(args.azimuth / 45) % 8) * 45
 if args.altitude_angle is None:
 	args.altitude_angle = random.randint(7, 45)
 if args.ambient_strength is None:
-	args.ambient_strength = 0.6 + (random.random() * random.random() * 0.4)
+	args.ambient_strength = 0.65 + (random.random() * random.random() * 0.35)
 
 reportString = ''
 for name in ['hue_delta', 'shine', 'glow', 'azimuth', 'altitude_angle', 'ambient_strength']:
