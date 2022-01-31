@@ -487,6 +487,7 @@ def skyView(elevation, radius):
 				ly, lx = y, x
 				dist = 0
 				highZ = z
+				highSlope = 0
 				occlusion = 0
 				for r in range(radius):
 					ly += dy
@@ -500,9 +501,12 @@ def skyView(elevation, radius):
 					if lz > highZ:
 						highZ = lz
 						slope = (lz - z) / dist
-						angle = math.atan(slope)
-						occlusion = angle / halfPi
-				viewSum -= occlusion
+						if slope > highSlope:
+							highSlope = slope
+				if highSlope != 0:
+					angle = math.atan(highSlope)
+					occlusion = angle / halfPi
+					viewSum -= occlusion
 			openness[y, x] = viewSum
 	openness /= numLines
 	return openness
