@@ -5,7 +5,7 @@
 
 > — Vita Sackville-West to Virginia Woolf, 4 February, 1926
 
-This is a python script that downloads a digital elevation model of a random location on earth, from which it produces a randomly-colored shaded terrain map. It gets its data from [SRTM](https://lpdaac.usgs.gov/products/srtmgl1v003/) and [ASTER](https://lpdaac.usgs.gov/products/astgtmv003/) 1 arc second DEMs and [Water](https://lpdaac.usgs.gov/products/srtmswbdv003/) [Body](https://lpdaac.usgs.gov/products/astwbdv001/) Databases. To access these data, the script needs an [Earthdata EOSDIS login](https://urs.earthdata.nasa.gov/users/new), that it will store [encrypted](https://github.com/zoggop/a-sort-of-soup/blob/main/catacomb.py).
+This is a python script that downloads a digital elevation model of a random location on earth, from which it produces a randomly-colored shaded terrain map. It gets its data from [SRTM](https://lpdaac.usgs.gov/products/srtmgl1v003/) and [ASTER](https://lpdaac.usgs.gov/products/astgtmv003/) 1 arc second DEMs and [Water](https://lpdaac.usgs.gov/products/srtmswbdv003/) [Body](https://lpdaac.usgs.gov/products/astwbdv001/) Databases. To access these data, the script needs an [Earthdata EOSDIS login](https://urs.earthdata.nasa.gov/users/new).
 
 ## Requirements
 
@@ -91,7 +91,7 @@ optional arguments:
                         CIE Delta-E 2000 at 57 lightness and 32 chromaticity.
                         Values over 35 will usually cause Delta-E between hues
                         to be uneven. If not specified, this will be chosen
-                        randomly between 20 and 40.
+                        randomly from 20 through 40.
   --lightnesses 0-100 [0-100 ...]
                         Up to three lightnesses, in order of elevation. The
                         remaining lightnesses will be chosen randomly.
@@ -109,17 +109,20 @@ optional arguments:
                         Any number of colors for the gradient to fill water
                         bodies with, formatted in a flat list of Lightness
                         Chroma Hue triplets.
-  --shine [0-1]         Intensity of hillshade highlights.
+  --shine [0-1]         Intensity of hillshade highlights. 0 by default.
   --glow [0-1]          Opacity of overlay and transparency of hard light
-                        blending of hillshade.
+                        blending of hillshade. 0 by default.
   --azimuth [0-359]     Azimuth of sunlight for hillshade and shadows (in
-                        45-degree increments).
+                        45-degree increments). If not specified, will be a
+                        random number from 0 through 180.
   --altitude-angle [1-90]
                         Altitude angle of sunlight for hillshade and shadows
-                        (in degrees).
+                        (in degrees). If not specified, this will be a random
+                        number from 7 through 45.
   --ambient-strength [0-1]
                         Strength of diffuse light in hillshade, and inverse of
-                        the darkness of cast shadows.
+                        the darkness of cast shadows. If not specified, this
+                        will be a random number from 0.65 through 1.00.
 ```
 
 ## Examples

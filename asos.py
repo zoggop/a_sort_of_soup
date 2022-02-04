@@ -1214,16 +1214,16 @@ def parseArguments():
 	parser.add_argument('--max-lightness', nargs='?', type=float, default=97, metavar='0-100', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
 	parser.add_argument('--min-chroma', nargs='?', type=float, default=0, metavar='0-134', help='Attempt to choose colors with at least this minimum chromaticity.')
 	parser.add_argument('--max-chroma', nargs='?', type=float, default=134, metavar='0-134', help='Maximum chromaticity of image.')
-	parser.add_argument('--hue-delta', nargs='?', type=int, metavar='Delta-E', help='Minimum color difference between hues as calculated by CIE Delta-E 2000 at 57 lightness and 32 chromaticity. Values over 35 will usually cause Delta-E between hues to be uneven. If not specified, this will be chosen randomly between 20 and 40.')
+	parser.add_argument('--hue-delta', nargs='?', type=int, metavar='Delta-E', help='Minimum color difference between hues as calculated by CIE Delta-E 2000 at 57 lightness and 32 chromaticity. Values over 35 will usually cause Delta-E between hues to be uneven. If not specified, this will be chosen randomly from 20 through 40.')
 	parser.add_argument('--lightnesses', nargs='+', type=int, metavar='0-100', help='Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
 	parser.add_argument('--chromas', nargs='+', type=int, metavar='0-134', help='Up to three chromaticities, in order of elevation. The remaining chromas will be chosen randomly. To specify only the second and/or third chromaticities, enter chromaticities of -1 to have them chosen randomly.')
 	parser.add_argument('--hues', nargs='+', type=int, metavar='0-359', help='Up to three hues, in order of elevation. The remaining hues will be chosen randomly. To specify only the second and/or third hue, enter hues of -1 to have them chosen randomly.')
 	parser.add_argument('--water-colors', nargs='+', type=int, metavar='L C H', help='Any number of colors for the gradient to fill water bodies with, formatted in a flat list of Lightness Chroma Hue triplets.')
-	parser.add_argument('--shine', nargs='?', type=float, default=0, metavar='0-1', help='Intensity of hillshade highlights.')
-	parser.add_argument('--glow', nargs='?', type=float, metavar='0-1', help='Opacity of overlay and transparency of hard light blending of hillshade.')
-	parser.add_argument('--azimuth', nargs='?', type=int, metavar='0-359', help='Azimuth of sunlight for hillshade and shadows (in 45-degree increments).')
-	parser.add_argument('--altitude-angle', nargs='?', type=int, metavar='1-90', help='Altitude angle of sunlight for hillshade and shadows (in degrees).')
-	parser.add_argument('--ambient-strength', nargs='?', type=float, metavar='0-1', help='Strength of diffuse light in hillshade, and inverse of the darkness of cast shadows.')
+	parser.add_argument('--shine', nargs='?', type=float, default=0, metavar='0-1', help='Intensity of hillshade highlights. 0 by default.')
+	parser.add_argument('--glow', nargs='?', type=float, default=0, metavar='0-1', help='Opacity of overlay and transparency of hard light blending of hillshade. 0 by default.')
+	parser.add_argument('--azimuth', nargs='?', type=int, metavar='0-359', help='Azimuth of sunlight for hillshade and shadows (in 45-degree increments). If not specified, will be a random number from 0 through 180.')
+	parser.add_argument('--altitude-angle', nargs='?', type=int, metavar='1-90', help='Altitude angle of sunlight for hillshade and shadows (in degrees). If not specified, this will be a random number from 7 through 45.')
+	parser.add_argument('--ambient-strength', nargs='?', type=float, metavar='0-1', help='Strength of diffuse light in hillshade, and inverse of the darkness of cast shadows. If not specified, this will be a random number from 0.65 through 1.00.')
 	return parser.parse_args()
 
 args = parseArguments()
@@ -1245,12 +1245,6 @@ if args.previous_light and os.path.exists(storageDir + '/previous-light.json'):
 
 if args.hue_delta is None:
 	args.hue_delta = random.randint(20, 40)
-if args.shine is None:
-	args.shine = random.random() * random.random() * random.random()
-	if args.shine < 0.05:
-		args.shine = 0
-if args.glow is None:
-	args.glow = random.random() * random.random()
 if args.azimuth is None:
 	args.azimuth = random.randint(0, 4) * 45
 else:
@@ -1261,7 +1255,7 @@ if args.ambient_strength is None:
 	args.ambient_strength = 0.65 + (random.random() * random.random() * 0.35)
 
 reportString = ''
-for name in ['hue_delta', 'shine', 'glow', 'azimuth', 'altitude_angle', 'ambient_strength']:
+for name in ['hue_delta', 'azimuth', 'altitude_angle', 'ambient_strength']:
 	nameConv = name.replace('_', '-')
 	val = getattr(args, name)
 	if val > 0 and abs(val) < 1:
