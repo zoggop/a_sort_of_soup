@@ -234,7 +234,8 @@ def radialGradient(width, height, azimuth, angle):
 	X = np.linspace(xy[0], xy[1], width)[None, :]
 	Y = np.linspace(xy[2], xy[3], height)[:, None]
 	radgrad = np.sqrt(X**2 + Y**2)
-	radgrad = np.clip(0,1,radgrad)
+	# radgrad = np.clip(0,1,radgrad)
+	radgrad = autocontrast(radgrad, 1)
 	return radgrad
 
 def hardLightOrOverlayFloat(a, b, overlay=False):
