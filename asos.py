@@ -363,81 +363,78 @@ def plotLightLine(azimuth, width, height):
 		line = plotLine(dy, width)
 	return line, isYline, dx, dy
 
-@jit(uint8[:,:](float32[:,:], uint8[:,:], int8[:], boolean, int64, int64, float64, float64), nopython=True)
-def shadowLoop(elev, light, XYline, isYline, dx, dy, dz, twoRootDZ):
+@jit(uint8[:,:](float32[:,:], uint8[:,:], int8[:], boolean, float64, float64, float64), nopython=True)
+def shadowLoop(elev, light, XYline, isYline, dx, dy, dz):
 	height, width = elev.shape
+	top = elev.max()
 	if isYline:
+		dy = int(dy)
 		if dy == -1:
 			lyStop = -1
 		else:
 			lyStop = height
 		for y in range(height):
 			for x in range(width):
-				if light[y, x] == 255:
-					z = elev[y, x]
-					lx, lz = x, z
-					ly = y + dy
-					while ly != lyStop:
-						change = XYline[ly]
-						lx += change
-						if lx < 0 or lx > width - 1:
-							break
-						if change != 0:
-							lz -= twoRootDZ
-						else:
-							lz -= dz
-						tz = elev[ly, lx]
-						if lz > tz:
-							light[ly, lx] = 0
-						else:
-							break
-						ly += dy
+				z = elev[y, x]
+				lx, lz = x, z
+				ly = y + dy
+				li = 0
+				while ly != lyStop:
+					change = XYline[li]
+					lx += change
+					if lx < 0 or lx > width - 1:
+						break
+					lz += dz
+					tz = elev[ly, lx]
+					if lz < tz:
+						light[y, x] = 0
+						break
+					elif lz > top:
+						break
+					ly += dy
+					li += 1
 	else:
+		dx = int(dx)
 		if dx == -1:
 			lxStop = -1
 		else:
 			lxStop = width
 		for y in range(height):
 			for x in range(width):
-				if light[y, x] == 255:
-					z = elev[y, x]
-					ly, lz = y, z
-					lx = x + dx
-					while lx != lxStop:
-						change = XYline[lx]
-						ly += change
-						if ly < 0 or ly > height - 1:
-							break
-						if change != 0:
-							lz -= twoRootDZ
-						else:
-							lz -= dz
-						tz = elev[ly, lx]
-						if lz > tz:
-							light[ly, lx] = 0
-						else:
-							break
-						lx += dx
-		# fake x-edges with neighbors
-		if dx > 0:
-			light[y, 0] = light[y, 1]
-		elif dx < 0:
-			light[y, width - 1] = light[y, width - 2]
-	if dy != 0:
-		# fake y-edge with neighbors
-		if dy > 0:
-			yEdge = 0
-			yNeigh = 1
-		elif dy < 0:
-			yEdge = height - 1
-			yNeigh = height - 2
-		for x in range(width):
-			light[yEdge, x] = light[yNeigh, x]
+				z = elev[y, x]
+				ly, lz = y, z
+				lx = x + dx
+				li = 0
+				while lx != lxStop:
+					change = XYline[li]
+					ly += change
+					if ly < 0 or ly > height - 1:
+						break
+					lz += dz
+					tz = elev[ly, lx]
+					if lz < tz:
+						light[y, x] = 0
+						break
+					elif lz > top:
+						break
+					lx += dx
+					li += 1
+	# fake y-edge with neighbors
+	if dy < 0:
+		light[0, :] = light[1, :]
+	elif dy > 0:
+		light[height - 1, :] = light[height - 2, :]
+	# fake x-edge with neighbors
+	if dx < 0:
+		light[:, 0] = light[:, 1]
+	elif dx > 0:
+		light[:, width - 1] = light[:, width - 2]
+	print(dy, dx)
 	return light
 
 def rayShadows(elevation, azimuth, angle, undersample=2):
 	# azimuth = 360 - azimuth
-	azimuth = (azimuth + 180) % 360
+	# azimuth = (azimuth + 180) % 360
 	dz = math.tan(angle * piPer180)
 	height, width = elevation.shape
 	height = round(height / undersample)
@@ -451,8 +448,8 @@ def rayShadows(elevation, azimuth, angle, undersample=2):
 		elev = elevation
 	elev = elev / undersample
 	light = np.full((height, width), 255, dtype=np.uint8)
-	twoRootDZ = math.sqrt(2) * dz
-	light = shadowLoop(elev, light, np.array(XYline, dtype=np.int8), isYline, int(dx), int(dy), dz, twoRootDZ)
+	light = shadowLoop(elev, light, np.array(XYline, dtype=np.int8), isYline, dx, dy, dz)
+	# Image.fromarray(light).save(storageDir + '/lightraw.tif')
 	kernSize = (math.floor((undersample + 2) / 2) * 2) + 1
 	if undersample > 1:
 		lightResample = resize(light, dsize=(elevation.shape[1], elevation.shape[0]), interpolation=INTER_LINEAR)
@@ -1247,9 +1244,7 @@ if args.previous_light and os.path.exists(storageDir + '/previous-light.json'):
 if args.hue_delta is None:
 	args.hue_delta = random.randint(20, 40)
 if args.azimuth is None:
-	args.azimuth = random.randint(0, 4) * 45
-else:
-	args.azimuth = (round(args.azimuth / 45) % 8) * 45
+	args.azimuth = random.randint(0, 180)
 if args.altitude_angle is None:
 	args.altitude_angle = random.randint(7, 45)
 if args.ambient_strength is None:
