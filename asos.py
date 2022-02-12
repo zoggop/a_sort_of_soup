@@ -363,7 +363,7 @@ def plotLightLine(azimuth, width, height):
 		line = plotLine(dy, width)
 	return line, isYline, dx, dy
 
-@jit(uint8[:,:](float32[:,:], uint8[:,:], int8[:], boolean, float64, float64, float64), nopython=True)
+@jit(uint8[:,:](float32[:,:], uint8[:,:], int8[:], boolean, float64, float64, float64), nopython=True, cache=True)
 def shadowLoop(elev, light, XYline, isYline, dx, dy, dz):
 	height, width = elev.shape
 	top = elev.max()
@@ -419,6 +419,15 @@ def shadowLoop(elev, light, XYline, isYline, dx, dy, dz):
 						break
 					lx += dx
 					li += 1
+	return light
+
+def rayShadows(elevation, azimuth, angle):
+	dz = math.tan(angle * piPer180)
+	height, width = elevation.shape
+	XYline, isYline, dx, dy = plotLightLine(azimuth, width, height)
+	# print(dx, dy, dz, isYline)
+	light = np.full((height, width), 255, dtype=np.uint8)
+	light = shadowLoop(elevation, light, np.array(XYline, dtype=np.int8), isYline, dx, dy, dz)
 	# fake y-edge with neighbors
 	if dy < 0:
 		light[0, :] = light[1, :]
@@ -429,37 +438,10 @@ def shadowLoop(elev, light, XYline, isYline, dx, dy, dz):
 		light[:, 0] = light[:, 1]
 	elif dx > 0:
 		light[:, width - 1] = light[:, width - 2]
-	print(dy, dx)
-	return light
+	Image.fromarray(light).save(storageDir + '/lightraw.tif')
+	return GaussianBlur(light, (3, 3), BORDER_DEFAULT)
 
-def rayShadows(elevation, azimuth, angle, undersample=2):
-	# azimuth = 360 - azimuth
-	# azimuth = (azimuth + 180) % 360
-	dz = math.tan(angle * piPer180)
-	height, width = elevation.shape
-	height = round(height / undersample)
-	width = round(width / undersample)
-	XYline, isYline, dx, dy = plotLightLine(azimuth, width, height)
-	# dz *= math.sqrt((dx*dx) + (dy*dy))
-	# print(dx, dy, dz, isYline)
-	if undersample > 1:
-		elev = resize(elevation, dsize=(width, height), interpolation=INTER_LINEAR)
-	else:
-		elev = elevation
-	elev = elev / undersample
-	light = np.full((height, width), 255, dtype=np.uint8)
-	light = shadowLoop(elev, light, np.array(XYline, dtype=np.int8), isYline, dx, dy, dz)
-	# Image.fromarray(light).save(storageDir + '/lightraw.tif')
-	kernSize = (math.floor((undersample + 2) / 2) * 2) + 1
-	if undersample > 1:
-		lightResample = resize(light, dsize=(elevation.shape[1], elevation.shape[0]), interpolation=INTER_LINEAR)
-		lightResample = medianBlur(lightResample, kernSize)
-	else:
-		lightResample = light
-	lightResample = GaussianBlur(lightResample, (kernSize, kernSize), BORDER_DEFAULT)
-	return lightResample
-
-@jit(float32[:,:](float32[:,:], int64), nopython=True)
+@jit(float32[:,:](float32[:,:], int64), nopython=True, cache=True)
 def skyView(elevation, radius):
 	# precompute eight lines dy, dx, and euclidean delta per segment
 	linesDY = []
@@ -1051,7 +1033,7 @@ class TerrainCrop:
 		# Image.fromarray((directHS * 255).astype(np.uint8)).save(storageDir + '/hs-dblend.tif')
 		if not args.no_shadows and ambientStrength < 1 and angle < 45:
 			# draw light/shadow map
-			lightMap = rayShadows(elevForShade, azimuth, angle, 1)
+			lightMap = rayShadows(elevForShade, azimuth, angle)
 			self.light_map = lightMap
 			# use light/shadow map as mask for direct and ambient hillshades
 			hs = ((lightMap/255) * directHS) + ((1 - (lightMap / 255)) * ambientStrength * ambientHS)
@@ -1093,10 +1075,16 @@ class TerrainCrop:
 		steps = math.ceil(math.sqrt((min(*self.waterbody.shape) ** 2) * 2))
 		wbd_radgrad = arrayColorizeWithInterpolation(radgrad, waterInterpolation, steps, False, True)
 		wbd_radgrad = randomDitherImage(wbd_radgrad)
+		monoColor = waterInterpolation(1)
+		wbd_mono = np.zeros_like(wbd_radgrad)
+		wbd_mono[:, :] = [int(monoColor.r * 255), int(monoColor.g * 255), int(monoColor.b * 255)]
 		if not self.light_map is None:
 			# cast shadows on water
-			lm = (self.light_map * 0.5 * (1 - args.ambient_strength)) + (args.ambient_strength * 127)
-			wbd_radgrad = lightLAB(wbd_radgrad, lm, args.glow)
+			# lm = (self.light_map * 0.5 * (1 - args.ambient_strength)) + (args.ambient_strength * 127)
+			# wbd_radgrad = lightLAB(wbd_radgrad, lm, args.glow)
+			lm = self.light_map / 255
+			lm = np.stack((lm, lm, lm), axis=2)
+			wbd_radgrad = ((lm * wbd_radgrad) + ((1 - lm) * wbd_mono)).astype(np.uint8)
 		# superimpose radial gradient with waterbody alpha
 		self.color_map_with_waterbody = ( (wbd_radgrad * wbd_alpha) + (bottomLayer * (1 - wbd_alpha)) ).astype(np.uint8)
 		if args.output is None:
