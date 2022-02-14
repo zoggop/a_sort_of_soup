@@ -438,7 +438,7 @@ def rayShadows(elevation, azimuth, angle):
 		light[:, 0] = light[:, 1]
 	elif dx > 0:
 		light[:, width - 1] = light[:, width - 2]
-	Image.fromarray(light).save(storageDir + '/lightraw.tif')
+	# Image.fromarray(light).save(storageDir + '/lightraw.tif')
 	return GaussianBlur(light, (3, 3), BORDER_DEFAULT)
 
 @jit(float32[:,:](float32[:,:], int64), nopython=True, cache=True)
