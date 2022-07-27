@@ -645,32 +645,39 @@ class TileDownload:
 		self.response = None # to reduce memory usage
 
 	def downloadWithAuth(self):
-		response = requests.get(self.url, auth = requests.auth.HTTPBasicAuth(self.username, self.password), stream=True)
-		if response.status_code == 404:
+		try:
+			response = requests.get(self.url, auth = requests.auth.HTTPBasicAuth(self.username, self.password), stream=True)
+		except requests.ConnectionError:
+			self.setStatus('failed to get response')
+		else:
+			if response.status_code == 404:
 				self.setStatus('404')
 				self.missing = True
-		elif response.status_code == 200:
-			self.response = response
-			self.streamResponseWithStatus()
-		elif response.url:
-			self.setStatus('redirected')
-			attempt = 1
-			response2 = None
-			while response2 is None:
-				try:
-					response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(self.username, self.password), stream=True)
-				except requests.ConnectionError:
-					self.setStatus('retrying after {} attempt'.format(attempt))
-					response2 = None
-				attempt += 1
-			if response2.status_code == 404:
-				self.setStatus('404')
-				self.missing = True
-			else:
-				self.response = response2
+			elif response.status_code == 200:
+				self.response = response
 				self.streamResponseWithStatus()
-		if not self.missing:
-			self.setStatus('downloaded {:,} kB'.format(int((self.fileSize or 0) / 1024)))
+			elif response.url:
+				self.setStatus('redirected')
+				attempt = 1
+				response2 = None
+				while response2 is None:
+					try:
+						response2 = requests.get(response.url, auth = requests.auth.HTTPBasicAuth(self.username, self.password), stream=True)
+					except requests.ConnectionError:
+						self.setStatus('retrying after {} attempt'.format(attempt))
+						response2 = None
+					attempt += 1
+				if response2.status_code == 404:
+					self.setStatus('404')
+					self.missing = True
+				else:
+					self.response = response2
+					self.streamResponseWithStatus()
+			else:
+				self.setStatus(str(self.status_code))
+				self.missing = True
+			if not self.missing:
+				self.setStatus('downloaded {:,} kB'.format(int((self.fileSize or 0) / 1024)))
 
 	def extractAndRead(self):
 		if not os.path.exists(self.filepath):
@@ -759,9 +766,9 @@ class Compartment:
 		tileDownloads = []
 		for code in self.codes:
 			if SRTMlocationCodes.get(code):
-				url = 'http://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/^^^.SRTMGL1.hgt.zip'
+				url = 'https://e4ftl01.cr.usgs.gov/MEASURES/SRTMGL1.003/2000.02.11/^^^.SRTMGL1.hgt.zip'
 				zipped = '^^^.hgt'
-				wbd_url = 'http://e4ftl01.cr.usgs.gov/MEASURES/SRTMSWBD.003/2000.02.11/^^^.SRTMSWBD.raw.zip'
+				wbd_url = 'https://e4ftl01.cr.usgs.gov/MEASURES/SRTMSWBD.003/2000.02.11/^^^.SRTMSWBD.raw.zip'
 				wbd_zipped = '^^^.raw'
 			elif ASTERlocationCodes.get(code):
 				url = 'https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ASTGTMV003_^^^.zip'
