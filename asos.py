@@ -646,7 +646,8 @@ class TileDownload:
 
 	def downloadWithAuth(self):
 		try:
-			response = requests.get(self.url, auth = requests.auth.HTTPBasicAuth(self.username, self.password), stream=True)
+			# response = requests.get(self.url, auth = requests.auth.HTTPBasicAuth(self.username, self.password), stream=True)
+			response = requests.get(self.url)
 		except requests.ConnectionError:
 			self.setStatus('failed to get response')
 		else:
@@ -671,6 +672,7 @@ class TileDownload:
 					self.setStatus('404')
 					self.missing = True
 				else:
+					self.setStatus(str(response2.status_code))
 					self.response = response2
 					self.streamResponseWithStatus()
 			else:
