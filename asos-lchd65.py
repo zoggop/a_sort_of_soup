@@ -21,7 +21,7 @@ from numba.types import uint8, float32, int8, boolean, int64, float64
 
 # local modules
 import catacomb
-# from perceptual_hues_lavg import perceptualHues
+from perceptual_hues_lavg import perceptualHues
 
 storageDir = os.path.expanduser('~/a_sort_of_soup')
 scriptDir = os.path.split(os.path.realpath(__file__))[0]
@@ -100,28 +100,27 @@ def xyMultAtLatLon(latitude, longitude, size=1):
 	return xMult, yMult, xMeters, yMeters
 
 def perceptuallyUniformRandomHue():
-	return random.randint(0, 359)
-	# return random.choice(perceptualHues)
+	return random.choice(perceptualHues)
 
 def angleDist(a, b):
 	return abs(((b - a) + 180) % 360 - 180)
 
 def lch_to_rgb(lightness, chroma, hue):
-	c = coloraide.Color('oklch', [lightness, chroma, hue]).convert('srgb')
+	c = coloraide.Color('lch-d65', [lightness, chroma, hue]).convert('srgb')
 	if c.in_gamut():
 		return c
 	return None
 
-def highestChromaColor(lightness, hue, maxChroma=0.4):
-	chromaStep = 0.1
-	if maxChroma < 0.1:
-		chromaStep = 0.01
+def highestChromaColor(lightness, hue, maxChroma=134):
+	chromaStep = 10
+	if maxChroma < 10:
+		chromaStep = 1
 	chroma = maxChroma
 	iteration = 0
 	while iteration < 45:
 		c = lch_to_rgb(lightness, chroma, hue)
 		if not c is None:
-			if chromaStep == 0.0001 or maxChroma == 0 or iteration == 0:
+			if chromaStep == 0.01 or maxChroma == 0 or iteration == 0:
 				return c
 			else:
 				chroma += chromaStep
@@ -132,8 +131,8 @@ def highestChromaColor(lightness, hue, maxChroma=0.4):
 	print(chromaStep, lightness, chroma, hue, iteration)
 
 def huesDeltaE(hueA, hueB):
-	a = lch_to_rgb(0.74, 0.124, hueA)
-	b = lch_to_rgb(0.74, 0.124, hueB)
+	a = lch_to_rgb(57, 32, hueA)
+	b = lch_to_rgb(57, 32, hueB)
 	return a.delta_e(b, method='2000')
 
 def nextHueByDeltaE(hues, targetDeltaE):
@@ -890,11 +889,11 @@ def pickHues(hueDeltaE):
 
 def pickLightnesses():
 	lightSpan = args.max_lightness - args.min_lightness
-	lightInterval = lightSpan / 3
+	lightInterval = math.floor(lightSpan / 3)
 	darkMidLight = [
-		random.uniform(args.min_lightness, args.min_lightness + lightInterval),
-		random.uniform(args.min_lightness + lightInterval, args.max_lightness - lightInterval),
-		random.uniform(args.max_lightness - lightInterval, args.max_lightness)]
+		random.randint(args.min_lightness, args.min_lightness + lightInterval - 1),
+		random.randint(args.min_lightness + lightInterval, args.max_lightness - lightInterval - 1),
+		random.randint(args.max_lightness - lightInterval,args.max_lightness)]
 	lOrders = [
 		[0, 1, 2],
 		[2, 0, 1],
@@ -924,7 +923,7 @@ def pickChromas():
 			chromas.append(args.chromas[cIndex])
 		else:
 			# chromas.append((random.randint(0,1) == 1 and random.randint(0, args.max_chroma)) or args.max_chroma)
-			chromas.append(random.uniform(args.min_chroma, args.max_chroma))
+			chromas.append(random.randint(args.min_chroma, args.max_chroma))
 	print('chromas:', chromas)
 	return chromas
 
@@ -941,7 +940,7 @@ def pickWaterColors(landColors, num=2):
 				if rgb is None:
 					rgb = highestChromaColor(lch[0], lch[2])
 				waterColors.append(rgb)
-				print('water color {}:'.format(len(waterColors)-1), waterColors[-1].convert('oklch'))
+				print('water color {}:'.format(len(waterColors)-1), waterColors[-1].convert('lch-d65'))
 				lch = []
 		return waterColors
 	# pick water colors
@@ -954,33 +953,30 @@ def pickWaterColors(landColors, num=2):
 			if c == lcolor:
 				allOthers.pop(ci)
 				break
-		color = highestChromaColor(lcolor.convert('oklch').l, random.choice(allOthers).convert('oklch').h, args.max_chroma)
-		print('water color {}:'.format(n), color.convert('oklch'))
+		color = highestChromaColor(lcolor.convert('lch-d65').l, random.choice(allOthers).convert('lch-d65').h, args.max_chroma)
+		print('water color {}:'.format(n), color.convert('lch-d65'))
 		waterColors.append(color)
 	return waterColors
 
-def highChromaGradient(lightnesses, chromas, hues, steps=16):
+def highChromaGradient(lightnesses, chromas, hues):
 	a = highestChromaColor(lightnesses[0], hues[0], chromas[0])
 	b = highestChromaColor(lightnesses[1], hues[1], chromas[1])
 	c = highestChromaColor(lightnesses[2], hues[2], chromas[2])
-	# return a.interpolate([b, c], space='oklab'), a, b, c
-	allSteps = a.steps([b, c], steps=steps, space='oklch')
-	halfSteps = math.floor(steps / 2) - 1
-	halfStepsHigh = halfSteps + 1
+	allSteps = a.steps([b, c], steps=256, space='lch-d65')
 	highChromaSteps = []
 	sIndex = 0
 	for col in allSteps:
-		lch = col.convert('oklch')
-		if sIndex > halfSteps:
-			mult = (sIndex - halfSteps) / halfStepsHigh
+		lch = col.convert('lch-d65')
+		if sIndex > 127:
+			mult = (sIndex - 127) / 128
 			chroma = ((1-mult) * chromas[1]) + (mult * chromas[2])
 		else:
-			mult = sIndex / halfSteps
+			mult = sIndex / 127
 			chroma = ((1-mult) * chromas[0]) + (mult * chromas[1])
 		highChromaSteps.append(highestChromaColor(lch.l, lch.h, chroma))
-		# print(sIndex, highChromaSteps[-1].convert('oklch'))
+		# print(sIndex, highChromaSteps[-1].convert('lch-d65').c)
 		sIndex += 1
-	return highChromaSteps[0].interpolate(highChromaSteps[1:], space='oklch'), a, b, c
+	return highChromaSteps[0].interpolate(highChromaSteps[1:], space='lch-d65'), a, b, c
 
 class TerrainCrop:
 
@@ -1083,8 +1079,8 @@ class TerrainCrop:
 		# create radial gradient image
 		radgrad = radialGradient(self.waterbody.shape[1], self.waterbody.shape[0], args.azimuth, args.altitude_angle)
 		# sort water colors by lightness descending
-		waterColors.sort(reverse = True, key = lambda color: color.convert('oklch').l)
-		waterInterpolation = waterColors[0].interpolate(waterColors[1:], space='oklab')
+		waterColors.sort(reverse = True, key = lambda color: color.convert('lch-d65').l)
+		waterInterpolation = waterColors[0].interpolate(waterColors[1:], space='lab-d65')
 		steps = math.ceil(math.sqrt((min(*self.waterbody.shape) ** 2) * 2))
 		wbd_radgrad = arrayColorizeWithInterpolation(radgrad, waterInterpolation, steps, False, True)
 		wbd_radgrad = randomDitherImage(wbd_radgrad)
@@ -1158,7 +1154,7 @@ class TerrainCrop:
 		wcLCH = []
 		if not args.no_water:
 			for color in self.waterColors:
-				lch = color.convert('oklch')
+				lch = color.convert('lch-d65')
 				wcLCH.append(lch.l)
 				wcLCH.append(lch.c)
 				wcLCH.append(lch.h)
@@ -1209,15 +1205,15 @@ def parseArguments():
 	parser.add_argument('--coordinates', '-c', nargs=2, type=float, metavar=('LATITUDE', 'LONGITUDE'), help='Location of center of desired image in latitude longitude coordinates. If not specified, a random location will be chosen.')
 	parser.add_argument('--dimensions', '-d', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'), help='Width and height in pixels of output image. Larger images will require downloading more source tiles. Defaults to screen dimensions.')
 	parser.add_argument('--rotation', '-r', nargs='?', type=int, metavar='0-3', help='How many times 90 degrees to rotate. (0: North is up. 1: East is up. 2: South is up. 3: West is up.) If not specified, this will be chosen randomly.')
-	parser.add_argument('--min-lightness', nargs='?', type=float, default=0.1, metavar='0-1', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
-	parser.add_argument('--max-lightness', nargs='?', type=float, default=0.9, metavar='0-1', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
-	parser.add_argument('--min-chroma', nargs='?', type=float, default=0, metavar='0-0.4', help='Attempt to choose colors with at least this minimum chromaticity.')
-	parser.add_argument('--max-chroma', nargs='?', type=float, default=0.4, metavar='0-0.4', help='Maximum chromaticity of image.')
-	parser.add_argument('--hue-delta', nargs='?', type=int, metavar='Delta-E', help='Minimum color difference between hues as calculated by CIE Delta-E 2000 at 0.74 lightness and 0.124 chromaticity. Values over 35 will usually cause Delta-E between hues to be uneven. If not specified, this will be chosen randomly from 20 through 40.')
-	parser.add_argument('--lightnesses', nargs='+', type=float, metavar='0-1', help='Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
-	parser.add_argument('--chromas', nargs='+', type=float, metavar='0-0.4', help='Up to three chromaticities, in order of elevation. The remaining chromas will be chosen randomly. To specify only the second and/or third chromaticities, enter chromaticities of -1 to have them chosen randomly.')
+	parser.add_argument('--min-lightness', nargs='?', type=float, default=5, metavar='0-100', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
+	parser.add_argument('--max-lightness', nargs='?', type=float, default=97, metavar='0-100', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
+	parser.add_argument('--min-chroma', nargs='?', type=float, default=0, metavar='0-134', help='Attempt to choose colors with at least this minimum chromaticity.')
+	parser.add_argument('--max-chroma', nargs='?', type=float, default=134, metavar='0-134', help='Maximum chromaticity of image.')
+	parser.add_argument('--hue-delta', nargs='?', type=int, metavar='Delta-E', help='Minimum color difference between hues as calculated by CIE Delta-E 2000 at 57 lightness and 32 chromaticity. Values over 35 will usually cause Delta-E between hues to be uneven. If not specified, this will be chosen randomly from 20 through 40.')
+	parser.add_argument('--lightnesses', nargs='+', type=int, metavar='0-100', help='Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
+	parser.add_argument('--chromas', nargs='+', type=int, metavar='0-134', help='Up to three chromaticities, in order of elevation. The remaining chromas will be chosen randomly. To specify only the second and/or third chromaticities, enter chromaticities of -1 to have them chosen randomly.')
 	parser.add_argument('--hues', nargs='+', type=int, metavar='0-359', help='Up to three hues, in order of elevation. The remaining hues will be chosen randomly. To specify only the second and/or third hue, enter hues of -1 to have them chosen randomly.')
-	parser.add_argument('--water-colors', nargs='+', type=float, metavar='L C H', help='Any number of colors for the gradient to fill water bodies with, formatted in a flat list of Lightness Chroma Hue triplets.')
+	parser.add_argument('--water-colors', nargs='+', type=int, metavar='L C H', help='Any number of colors for the gradient to fill water bodies with, formatted in a flat list of Lightness Chroma Hue triplets.')
 	parser.add_argument('--shine', nargs='?', type=float, default=0, metavar='0-1', help='Intensity of hillshade highlights. 0 by default.')
 	parser.add_argument('--glow', nargs='?', type=float, default=0, metavar='0-1', help='Opacity of overlay and transparency of hard light blending of hillshade. 0 by default.')
 	parser.add_argument('--azimuth', nargs='?', type=int, metavar='0-359', help='Azimuth of sunlight for hillshade and shadows (in 45-degree increments). If not specified, will be a random number from 0 through 180.')
