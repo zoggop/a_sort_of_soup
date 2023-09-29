@@ -959,10 +959,23 @@ def pickWaterColors(landColors, num=2):
 		waterColors.append(color)
 	return waterColors
 
-def highChromaGradient(lightnesses, chromas, hues, steps=16):
+def saveInterpolationImage(interpolation, tifname):
+	grad = np.tile(np.linspace(0, 255, 256, dtype=np.uint8), (256, 1))
+	colorizedGrad = arrayColorizeWithInterpolation(grad, interpolation)
+	Image.fromarray(colorizedGrad).save(storageDir + '/{}.tif'.format(tifname))
+
+def highChromaGradient(lightnesses, chromas, hues, steps=32, colorfulness=1):
 	a = highestChromaColor(lightnesses[0], hues[0], chromas[0])
 	b = highestChromaColor(lightnesses[1], hues[1], chromas[1])
 	c = highestChromaColor(lightnesses[2], hues[2], chromas[2])
+	print(a.convert('oklch'))
+	print(b.convert('oklch'))
+	print(c.convert('oklch'))
+	if colorfulness == 0:
+		return a.interpolate([b, c], space='oklch'), a, b, c
+	aChroma = (a.convert('oklch').c * (1 - colorfulness)) + (chromas[0] * colorfulness)
+	bChroma = (b.convert('oklch').c * (1 - colorfulness)) + (chromas[1] * colorfulness)
+	cChroma = (c.convert('oklch').c * (1 - colorfulness)) + (chromas[2] * colorfulness)
 	# return a.interpolate([b, c], space='oklab'), a, b, c
 	allSteps = a.steps([b, c], steps=steps, space='oklch')
 	halfSteps = math.floor(steps / 2) - 1
@@ -973,10 +986,10 @@ def highChromaGradient(lightnesses, chromas, hues, steps=16):
 		lch = col.convert('oklch')
 		if sIndex > halfSteps:
 			mult = (sIndex - halfSteps) / halfStepsHigh
-			chroma = ((1-mult) * chromas[1]) + (mult * chromas[2])
+			chroma = ((1-mult) * bChroma) + (mult * cChroma)
 		else:
 			mult = sIndex / halfSteps
-			chroma = ((1-mult) * chromas[0]) + (mult * chromas[1])
+			chroma = ((1-mult) * aChroma) + (mult * bChroma)
 		highChromaSteps.append(highestChromaColor(lch.l, lch.h, chroma))
 		# print(sIndex, highChromaSteps[-1].convert('oklch'))
 		sIndex += 1
@@ -1146,6 +1159,8 @@ class TerrainCrop:
 		self.chromas = pickChromas()
 		self.hues = pickHues(args.hue_delta)
 		interpolation, a, b, c = highChromaGradient(self.lightnesses, self.chromas, self.hues)
+		saveInterpolationImage(interpolation, 'hcg')
+		saveInterpolationImage(a.interpolate([b, c], space='oklch'), 'oklchg')
 		self.colorizeElevation(interpolation)
 		self.shade(args.azimuth, args.altitude_angle, args.ambient_strength)
 		self.overlayShade()
@@ -1170,7 +1185,7 @@ class TerrainCrop:
 		return out
 
 	def lightDict(self):
-		# output dictionary of color information
+		# output dictionary of light information
 		out = {
 			'glow' : args.glow,
 			'shine' : args.shine,
@@ -1218,6 +1233,7 @@ def parseArguments():
 	parser.add_argument('--chromas', nargs='+', type=float, metavar='0-0.4', help='Up to three chromaticities, in order of elevation. The remaining chromas will be chosen randomly. To specify only the second and/or third chromaticities, enter chromaticities of -1 to have them chosen randomly.')
 	parser.add_argument('--hues', nargs='+', type=int, metavar='0-359', help='Up to three hues, in order of elevation. The remaining hues will be chosen randomly. To specify only the second and/or third hue, enter hues of -1 to have them chosen randomly.')
 	parser.add_argument('--water-colors', nargs='+', type=float, metavar='L C H', help='Any number of colors for the gradient to fill water bodies with, formatted in a flat list of Lightness Chroma Hue triplets.')
+	parser.add_argument('--colorfulness', nargs='?', type=float, default=1, metavar='0-1', help='0 creates a gradient in OKLCH space between the three in-sRGB-gamut colors chosen. 1 finds the highest chroma colors possible at or below the *specified* three chromas. 1 by default.')
 	parser.add_argument('--shine', nargs='?', type=float, default=0, metavar='0-1', help='Intensity of hillshade highlights. 0 by default.')
 	parser.add_argument('--glow', nargs='?', type=float, default=0, metavar='0-1', help='Opacity of overlay and transparency of hard light blending of hillshade. 0 by default.')
 	parser.add_argument('--azimuth', nargs='?', type=int, metavar='0-359', help='Azimuth of sunlight for hillshade and shadows (in 45-degree increments). If not specified, will be a random number from 0 through 180.')
