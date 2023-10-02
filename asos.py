@@ -169,7 +169,7 @@ def randomDitherImage(arr):
 	dithered[~mask] = high[~mask]
 	return dithered
 
-def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha=False, floatChannels=False):
+def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha=False, floatChannels=False, outputLCH=False):
 	if numColors is None:
 		if greyArr.dtype == np.uint8:
 			numColors = 256
@@ -186,17 +186,21 @@ def arrayColorizeWithInterpolation(greyArr, interpolation, numColors=None, alpha
 			greyArr = greyArr.astype(np.uint16)
 	divisor = numColors - 1
 	channels = ['red', 'green', 'blue']
+	if outputLCH:
+		channels = ['lightness', 'chroma', 'hue']
 	if alpha:
 		channels.append('alpha')
 	numChannels = len(channels)
 	dt = np.uint8
-	if floatChannels:
+	if floatChannels or outputLCH:
 		dt = 'float32'
 	lookupColor = np.zeros((numColors, numChannels), dtype=dt)
 	for l in range(0, numColors):
 		n = l / divisor
 		if floatChannels:
 			lookupColor[l] = [max(0,min(1,getattr(interpolation(n), channels[ci]))) for ci in range(numChannels)]
+		elif outputLCH:
+			lookupColor[l] = [getattr(interpolation(n).convert('oklch'), channels[ci]) for ci in range(numChannels)]
 		else:
 			lookupColor[l] = [max(0,min(255,round(getattr(interpolation(n), channels[ci]) * 255))) for ci in range(numChannels)]
 	colorArr = np.zeros((*greyArr.shape, numChannels), dtype=dt)
@@ -312,6 +316,9 @@ def lightOKLCH(aRGB, b, glow):
 
 def RGB2552OKLCH(RGB):
 	lut = np.load(os.path.expanduser('~/rgb2lch.npy'))
+	gray = lut[:,:,:,0] + lut[:,:,:,1] + lut[:,:,:,2]
+	blackCoords = np.column_stack(np.where(gray == 0))
+	print(blackCoords.shape)
 	o = lut[RGB[:,:,0], RGB[:,:,1], RGB[:,:,2]]
 	l = np.clip(o[:,:,0], 0, 1)
 	c = np.clip(o[:,:,1], 0, 0.32)
@@ -323,18 +330,29 @@ def RGB2552OKLCH(RGB):
 
 def OKLCH2RGB255(LCH):
 	lut = np.load(os.path.expanduser('~/lch2rgb.npy'))
-	li = np.clip((LCH[:,:,0] * 299).astype(np.uint16), 0, 299)
-	ci = np.clip((LCH[:,:,1] * 934.375).astype(np.uint16), 0, 299)
+	lRes, cRes, hRes, three = lut.shape
+	liMax = lRes - 1
+	ciMax = cRes - 1
+	ciMult = ciMax / 0.32
+	print(liMax, ciMax, ciMult)
+	li = np.clip((LCH[:,:,0] * liMax).astype(np.uint16), 0, liMax)
+	ci = np.clip((LCH[:,:,1] * ciMult).astype(np.uint16), 0, ciMax)
 	hi = np.clip((LCH[:,:,2]).astype(np.uint16), 0, 360)
 	print(li.min(), li.max(), "li")
 	print(ci.min(), ci.max(), "ci")
 	print(hi.min(), hi.max(), "hi")
 	o = lut[li, ci, hi]
 	print(o.min(), o.max(), "rgb255")
-	return np.clip(o, 0, 255)
+	return np.clip(o, 0, 255).astype(np.uint8)
 
 def lightLUTOKLCH(aRGB, b, glow):
-	aLCH = RGB2552OKLCH(aRGB)
+	# aLCH = RGB2552OKLCH(aRGB)
+	aLCH = aRGB
+	gray = aLCH[:,:,0] + aLCH[:,:,1] + aLCH[:,:,2]
+	blackCoords = np.column_stack(np.where(gray == 0))
+	print(blackCoords.shape)
+	# for coords in blackCoords:
+	# 	print(aRGB[coords[0], coords[1]])
 	a = aLCH[:,:,0]
 	b = (b / 255).astype(np.single)
 	if glow == 0:
@@ -347,8 +365,14 @@ def lightLUTOKLCH(aRGB, b, glow):
 		ab = (glow * abOver) + ((1 - glow) * abHard)
 	# use the blended lightness channel
 	newLCH = np.stack((ab, aLCH[:,:,1], aLCH[:,:,2]), axis=2)
+	# newRGB = OKLCH2RGB255(newLCH)
 	newRGB = OKLCH2RGB255(newLCH)
-	return newRGB.astype(np.uint8)
+	gray = newRGB[:,:,0] + newRGB[:,:,1] + newRGB[:,:,2]
+	blackCoords = np.column_stack(np.where(gray == 0))
+	print(blackCoords.shape)
+	# for coords in blackCoords:
+		# print(newLCH[coords[0], coords[1]], coords, aLCH[coords[0], coords[1]])
+	return newRGB
 
 def lightRGB(aRGB, b, glow):
 	a = (aRGB / 255).astype(np.single)
@@ -1169,16 +1193,19 @@ class TerrainCrop:
 		else:
 			elevForColor = self.elevation
 		# colorize elevation data
-		self.color_elev = arrayColorizeWithInterpolation(elevForColor, interpolation, 1024)
+		# self.color_elev = arrayColorizeWithInterpolation(elevForColor, interpolation, 1024)
+		self.lch_color_elev = arrayColorizeWithInterpolation(elevForColor, interpolation, 1024, False, False, True)
 
 	def overlayShade(self):
 		# blend colorized elevation with hillshade using overlay
 		if args.no_shade or self.hillshade is None:
-			return
-		# self.shaded_color_elev = lightOKLCH(self.color_elev, self.hillshade, args.glow)
-		# self.shaded_color_elev = lightLAB(self.color_elev, self.hillshade, args.glow)
-		# self.shaded_color_elev = lightRGB(self.color_elev, self.hillshade, args.glow)
-		self.shaded_color_elev = lightLUTOKLCH(self.color_elev, self.hillshade, args.glow)
+			self.shaded_color_elev = OKLCH2RGB255(self.lch_color_elev)
+		else:
+			# self.shaded_color_elev = lightOKLCH(self.color_elev, self.hillshade, args.glow)
+			# self.shaded_color_elev = lightLAB(self.color_elev, self.hillshade, args.glow)
+			# self.shaded_color_elev = lightRGB(self.color_elev, self.hillshade, args.glow)
+			# self.shaded_color_elev = lightLUTOKLCH(self.color_elev, self.hillshade, args.glow)
+			self.shaded_color_elev = lightLUTOKLCH(self.lch_color_elev, self.hillshade, args.glow)
 
 	def superimposeWaterbody(self, waterColors):
 		if args.no_water or self.waterbody is None:
@@ -1243,8 +1270,8 @@ class TerrainCrop:
 			if not args.no_shadows and not self.light_map is None:
 				Image.fromarray(self.light_map).save(storageDir + '/light.tif')
 				print('saved', storageDir + '/light.tif')
-			Image.fromarray(self.color_elev).save(storageDir + '/elevation_gradient.tif')
-			print('saved', storageDir + '/elevation_gradient.tif')
+			# Image.fromarray(self.color_elev).save(storageDir + '/elevation_gradient.tif')
+			# print('saved', storageDir + '/elevation_gradient.tif')
 			final_img.save(storageDir + '/output.png')
 			print('saved', storageDir + '/output.png')
 

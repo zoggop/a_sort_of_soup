@@ -21,7 +21,7 @@ for ri in range(255):
 np.save(os.path.expanduser('~/rgb2lch.npy'), rgb2lch)
 print(cMax, "maximum chroma")
 
-cMax = 0.32
+# cMax = 0.322
 
 lResolution = 300
 cResolution = 300
