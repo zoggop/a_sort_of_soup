@@ -270,6 +270,101 @@ def lightLAB(aRGB, b, glow):
 	newRGB = cvtColor(newLab.astype(np.single), COLOR_Lab2RGB) * 255
 	return newRGB.astype(np.uint8)
 
+def rgbfloat2oklch(item):
+	color = coloraide.Color('srgb', [item[0], item[1], item[2]]).convert('oklch')
+	return [color.l, color.c, color.h]
+
+def oklch2rgbfloat(item):
+	color = coloraide.Color('oklch', [item[0], item[1], item[2]]).convert('srgb')
+	return [max(0, min(1, color.r)), max(0, min(1, color.g)), max(0, min(1, color.b))]
+
+def convertImageArray(arr, conversionFunction):
+	carr = np.zeros_like(arr)
+	for iy, ix in np.ndindex(arr.shape[:2]):
+		carr[iy, ix] = conversionFunction(arr[iy, ix])
+		if iy == 0 and ix < 10:
+			print(iy, ix, arr[iy, ix], carr[iy, ix])
+	return carr
+
+def convertRGB2LCH(arr):
+	return convertImageArray(arr, rgbfloat2oklch)
+
+def convertLCH2RGB(arr):
+	return convertImageArray(arr, oklch2rgbfloat)
+
+def lightOKLCH(aRGB, b, glow):
+	aRGBfloat = (aRGB / 255).astype(np.single)
+	aLCH = convertRGB2LCH(aRGBfloat)
+	a = aLCH[:,:,0].astype(float)
+	b = (b / 255).astype(float)
+	if glow == 0:
+		ab = hardLightOrOverlayFloat(a, b)
+	elif glow == 1:
+		ab = hardLightOrOverlayFloat(a, b, True)
+	else:
+		abHard = hardLightOrOverlayFloat(a, b)
+		abOver = hardLightOrOverlayFloat(a, b, True)
+		ab = (glow * abOver) + ((1 - glow) * abHard)
+	# use the blended lightness channel
+	newLCH = np.stack((ab, aLCH[:,:,1], aLCH[:,:,2]), axis=2)
+	newRGB = convertLCH2RGB(newLCH) * 255
+	return newRGB.astype(np.uint8)
+
+def RGB2552OKLCH(RGB):
+	lut = np.load(os.path.expanduser('~/rgb2lch.npy'))
+	o = lut[RGB[:,:,0], RGB[:,:,1], RGB[:,:,2]]
+	l = np.clip(o[:,:,0], 0, 1)
+	c = np.clip(o[:,:,1], 0, 0.32)
+	h = np.clip(o[:,:,2], 0, 360)
+	print(l.min(), l.max(), "l")
+	print(c.min(), c.max(), "c")
+	print(h.min(), h.max(), "h")
+	return np.stack((l, c, h), axis=2)
+
+def OKLCH2RGB255(LCH):
+	lut = np.load(os.path.expanduser('~/lch2rgb.npy'))
+	li = np.clip((LCH[:,:,0] * 299).astype(np.uint16), 0, 299)
+	ci = np.clip((LCH[:,:,1] * 934.375).astype(np.uint16), 0, 299)
+	hi = np.clip((LCH[:,:,2]).astype(np.uint16), 0, 360)
+	print(li.min(), li.max(), "li")
+	print(ci.min(), ci.max(), "ci")
+	print(hi.min(), hi.max(), "hi")
+	o = lut[li, ci, hi]
+	print(o.min(), o.max(), "rgb255")
+	return np.clip(o, 0, 255)
+
+def lightLUTOKLCH(aRGB, b, glow):
+	aLCH = RGB2552OKLCH(aRGB)
+	a = aLCH[:,:,0]
+	b = (b / 255).astype(np.single)
+	if glow == 0:
+		ab = hardLightOrOverlayFloat(a, b)
+	elif glow == 1:
+		ab = hardLightOrOverlayFloat(a, b, True)
+	else:
+		abHard = hardLightOrOverlayFloat(a, b)
+		abOver = hardLightOrOverlayFloat(a, b, True)
+		ab = (glow * abOver) + ((1 - glow) * abHard)
+	# use the blended lightness channel
+	newLCH = np.stack((ab, aLCH[:,:,1], aLCH[:,:,2]), axis=2)
+	newRGB = OKLCH2RGB255(newLCH)
+	return newRGB.astype(np.uint8)
+
+def lightRGB(aRGB, b, glow):
+	a = (aRGB / 255).astype(np.single)
+	b1 = (b / 255).astype(np.single)
+	b = np.stack((b1, b1, b1), axis=2)
+	if glow == 0:
+		ab = hardLightOrOverlayFloat(a, b)
+	elif glow == 1:
+		ab = hardLightOrOverlayFloat(a, b, True)
+	else:
+		abHard = hardLightOrOverlayFloat(a, b)
+		abOver = hardLightOrOverlayFloat(a, b, True)
+		ab = (glow * abOver) + ((1 - glow) * abHard)
+	# use the blended lightness channel
+	return (ab * 255).astype(np.uint8)
+
 def image_histogram_equalization(image, number_bins=65536):
 	# from http://www.janeriksolem.net/histogram-equalization-with-python-and.html
 	# get image histogram
@@ -1080,7 +1175,10 @@ class TerrainCrop:
 		# blend colorized elevation with hillshade using overlay
 		if args.no_shade or self.hillshade is None:
 			return
-		self.shaded_color_elev = lightLAB(self.color_elev, self.hillshade, args.glow)
+		# self.shaded_color_elev = lightOKLCH(self.color_elev, self.hillshade, args.glow)
+		# self.shaded_color_elev = lightLAB(self.color_elev, self.hillshade, args.glow)
+		# self.shaded_color_elev = lightRGB(self.color_elev, self.hillshade, args.glow)
+		self.shaded_color_elev = lightLUTOKLCH(self.color_elev, self.hillshade, args.glow)
 
 	def superimposeWaterbody(self, waterColors):
 		if args.no_water or self.waterbody is None:
@@ -1224,10 +1322,10 @@ def parseArguments():
 	parser.add_argument('--coordinates', '-c', nargs=2, type=float, metavar=('LATITUDE', 'LONGITUDE'), help='Location of center of desired image in latitude longitude coordinates. If not specified, a random location will be chosen.')
 	parser.add_argument('--dimensions', '-d', nargs=2, type=int, metavar=('WIDTH', 'HEIGHT'), help='Width and height in pixels of output image. Larger images will require downloading more source tiles. Defaults to screen dimensions.')
 	parser.add_argument('--rotation', '-r', nargs='?', type=int, metavar='0-3', help='How many times 90 degrees to rotate. (0: North is up. 1: East is up. 2: South is up. 3: West is up.) If not specified, this will be chosen randomly.')
-	parser.add_argument('--min-lightness', nargs='?', type=float, default=0.1, metavar='0-1', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
-	parser.add_argument('--max-lightness', nargs='?', type=float, default=0.9, metavar='0-1', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
+	parser.add_argument('--min-lightness', nargs='?', type=float, default=0.05, metavar='0-1', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
+	parser.add_argument('--max-lightness', nargs='?', type=float, default=0.95, metavar='0-1', help='Unless specified by --lightnesses, lightnesses will be randomly chosen between --min-lightness and --max-lightness.')
 	parser.add_argument('--min-chroma', nargs='?', type=float, default=0, metavar='0-0.4', help='Attempt to choose colors with at least this minimum chromaticity.')
-	parser.add_argument('--max-chroma', nargs='?', type=float, default=0.4, metavar='0-0.4', help='Maximum chromaticity of image.')
+	parser.add_argument('--max-chroma', nargs='?', type=float, default=0.32, metavar='0-0.4', help='Maximum chromaticity of image.')
 	parser.add_argument('--hue-delta', nargs='?', type=int, metavar='Delta-E', help='Minimum color difference between hues as calculated by CIE Delta-E 2000 at 0.74 lightness and 0.124 chromaticity. Values over 35 will usually cause Delta-E between hues to be uneven. If not specified, this will be chosen randomly from 20 through 40.')
 	parser.add_argument('--lightnesses', nargs='+', type=float, metavar='0-1', help='Up to three lightnesses, in order of elevation. The remaining lightnesses will be chosen randomly.')
 	parser.add_argument('--chromas', nargs='+', type=float, metavar='0-0.4', help='Up to three chromaticities, in order of elevation. The remaining chromas will be chosen randomly. To specify only the second and/or third chromaticities, enter chromaticities of -1 to have them chosen randomly.')
