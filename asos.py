@@ -13,7 +13,7 @@ from io import BytesIO
 import random
 import sys
 import json
-from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT, medianBlur, cvtColor, COLOR_RGB2Lab, COLOR_Lab2RGB
+from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT, medianBlur
 import concurrent.futures
 from screeninfo import get_monitors
 from numba import jit
@@ -255,104 +255,19 @@ def hardLightOrOverlayFloat(a, b, overlay=False):
 	ab[mask] = (1 - 2 * (1 - a) * (1 - b))[mask] # else this
 	return ab
 
-def lightLAB(aRGB, b, glow):
-	# aRGB is three-channel, b is one-channel
-	aLab = cvtColor((aRGB / 255).astype(np.single), COLOR_RGB2Lab)
-	a = aLab[:,:,0] / 100 # extract lightness to range 0-1
-	b = b.astype(float) / 255 # make float on range 0-1
-	# apply and mix hard light and overlay using glow as overlay opacity
-	if glow == 0:
-		ab = hardLightOrOverlayFloat(a, b)
-	elif glow == 1:
-		ab = hardLightOrOverlayFloat(a, b, True)
-	else:
-		abHard = hardLightOrOverlayFloat(a, b)
-		abOver = hardLightOrOverlayFloat(a, b, True)
-		ab = (glow * abOver) + ((1 - glow) * abHard)
-	# use the blended lightness channel
-	newLab = np.stack((ab * 100, aLab[:,:,1], aLab[:,:,2]), axis=2)
-	newRGB = cvtColor(newLab.astype(np.single), COLOR_Lab2RGB) * 255
-	return newRGB.astype(np.uint8)
-
-def rgbfloat2oklch(item):
-	color = coloraide.Color('srgb', [item[0], item[1], item[2]]).convert('oklch')
-	return [color.l, color.c, color.h]
-
-def oklch2rgbfloat(item):
-	color = coloraide.Color('oklch', [item[0], item[1], item[2]]).convert('srgb')
-	return [max(0, min(1, color.r)), max(0, min(1, color.g)), max(0, min(1, color.b))]
-
-def convertImageArray(arr, conversionFunction):
-	carr = np.zeros_like(arr)
-	for iy, ix in np.ndindex(arr.shape[:2]):
-		carr[iy, ix] = conversionFunction(arr[iy, ix])
-		if iy == 0 and ix < 10:
-			print(iy, ix, arr[iy, ix], carr[iy, ix])
-	return carr
-
-def convertRGB2LCH(arr):
-	return convertImageArray(arr, rgbfloat2oklch)
-
-def convertLCH2RGB(arr):
-	return convertImageArray(arr, oklch2rgbfloat)
-
-def lightOKLCH(aRGB, b, glow):
-	aRGBfloat = (aRGB / 255).astype(np.single)
-	aLCH = convertRGB2LCH(aRGBfloat)
-	a = aLCH[:,:,0].astype(float)
-	b = (b / 255).astype(float)
-	if glow == 0:
-		ab = hardLightOrOverlayFloat(a, b)
-	elif glow == 1:
-		ab = hardLightOrOverlayFloat(a, b, True)
-	else:
-		abHard = hardLightOrOverlayFloat(a, b)
-		abOver = hardLightOrOverlayFloat(a, b, True)
-		ab = (glow * abOver) + ((1 - glow) * abHard)
-	# use the blended lightness channel
-	newLCH = np.stack((ab, aLCH[:,:,1], aLCH[:,:,2]), axis=2)
-	newRGB = convertLCH2RGB(newLCH) * 255
-	return newRGB.astype(np.uint8)
-
-def RGB2552OKLCH(RGB):
-	lut = np.load(os.path.expanduser('~/rgb2lch.npy'))
-	gray = lut[:,:,:,0] + lut[:,:,:,1] + lut[:,:,:,2]
-	blackCoords = np.column_stack(np.where(gray == 0))
-	print(blackCoords.shape)
-	o = lut[RGB[:,:,0], RGB[:,:,1], RGB[:,:,2]]
-	l = np.clip(o[:,:,0], 0, 1)
-	c = np.clip(o[:,:,1], 0, 0.32)
-	h = np.clip(o[:,:,2], 0, 360)
-	print(l.min(), l.max(), "l")
-	print(c.min(), c.max(), "c")
-	print(h.min(), h.max(), "h")
-	return np.stack((l, c, h), axis=2)
-
 def OKLCH2RGB255(LCH):
-	lut = np.load(os.path.expanduser('~/lch2rgb.npy'))
+	lut = np.load(scriptDir + '/lch2rgb.npy')
 	lRes, cRes, hRes, three = lut.shape
 	liMax = lRes - 1
 	ciMax = cRes - 1
 	ciMult = ciMax / 0.32
-	print(liMax, ciMax, ciMult)
 	li = np.clip((LCH[:,:,0] * liMax).astype(np.uint16), 0, liMax)
 	ci = np.clip((LCH[:,:,1] * ciMult).astype(np.uint16), 0, ciMax)
 	hi = np.clip((LCH[:,:,2]).astype(np.uint16), 0, 360)
-	print(li.min(), li.max(), "li")
-	print(ci.min(), ci.max(), "ci")
-	print(hi.min(), hi.max(), "hi")
 	o = lut[li, ci, hi]
-	print(o.min(), o.max(), "rgb255")
 	return np.clip(o, 0, 255).astype(np.uint8)
 
-def lightLUTOKLCH(aRGB, b, glow):
-	# aLCH = RGB2552OKLCH(aRGB)
-	aLCH = aRGB
-	gray = aLCH[:,:,0] + aLCH[:,:,1] + aLCH[:,:,2]
-	blackCoords = np.column_stack(np.where(gray == 0))
-	print(blackCoords.shape)
-	# for coords in blackCoords:
-	# 	print(aRGB[coords[0], coords[1]])
+def lightLUTOKLCH(aLCH, b, glow):
 	a = aLCH[:,:,0]
 	b = (b / 255).astype(np.single)
 	if glow == 0:
@@ -365,13 +280,7 @@ def lightLUTOKLCH(aRGB, b, glow):
 		ab = (glow * abOver) + ((1 - glow) * abHard)
 	# use the blended lightness channel
 	newLCH = np.stack((ab, aLCH[:,:,1], aLCH[:,:,2]), axis=2)
-	# newRGB = OKLCH2RGB255(newLCH)
 	newRGB = OKLCH2RGB255(newLCH)
-	gray = newRGB[:,:,0] + newRGB[:,:,1] + newRGB[:,:,2]
-	blackCoords = np.column_stack(np.where(gray == 0))
-	print(blackCoords.shape)
-	# for coords in blackCoords:
-		# print(newLCH[coords[0], coords[1]], coords, aLCH[coords[0], coords[1]])
 	return newRGB
 
 def lightRGB(aRGB, b, glow):
@@ -1161,7 +1070,7 @@ class TerrainCrop:
 			self.waterbody = np.rot90(self.waterbody, k=rotation)
 		print("rotated", self.elevation.shape, arr.min(), arr.max())
 
-	def shade(self, azimuth=135, angle=45, ambientStrength=0.67):
+	def shade(self, azimuth=135, angle=45, ambientStrength=0.8):
 		if args.no_shade:
 			return
 		# process elevation map for hillshading
@@ -1201,10 +1110,7 @@ class TerrainCrop:
 		if args.no_shade or self.hillshade is None:
 			self.shaded_color_elev = OKLCH2RGB255(self.lch_color_elev)
 		else:
-			# self.shaded_color_elev = lightOKLCH(self.color_elev, self.hillshade, args.glow)
-			# self.shaded_color_elev = lightLAB(self.color_elev, self.hillshade, args.glow)
 			# self.shaded_color_elev = lightRGB(self.color_elev, self.hillshade, args.glow)
-			# self.shaded_color_elev = lightLUTOKLCH(self.color_elev, self.hillshade, args.glow)
 			self.shaded_color_elev = lightLUTOKLCH(self.lch_color_elev, self.hillshade, args.glow)
 
 	def superimposeWaterbody(self, waterColors):
@@ -1232,7 +1138,6 @@ class TerrainCrop:
 		if not self.light_map is None:
 			# cast shadows on water
 			# lm = (self.light_map * 0.5 * (1 - args.ambient_strength)) + (args.ambient_strength * 127)
-			# wbd_radgrad = lightLAB(wbd_radgrad, lm, args.glow)
 			lm = self.light_map / 255
 			lm = np.stack((lm, lm, lm), axis=2)
 			wbd_radgrad = ((lm * wbd_radgrad) + ((1 - lm) * wbd_mono)).astype(np.uint8)
@@ -1363,7 +1268,7 @@ def parseArguments():
 	parser.add_argument('--glow', nargs='?', type=float, default=0, metavar='0-1', help='Opacity of overlay and transparency of hard light blending of hillshade. 0 by default.')
 	parser.add_argument('--azimuth', nargs='?', type=int, metavar='0-359', help='Azimuth of sunlight for hillshade and shadows (in 45-degree increments). If not specified, will be a random number from 0 through 180.')
 	parser.add_argument('--altitude-angle', nargs='?', type=int, metavar='1-90', help='Altitude angle of sunlight for hillshade and shadows (in degrees). If not specified, this will be a random number from 7 through 45.')
-	parser.add_argument('--ambient-strength', nargs='?', type=float, metavar='0-1', help='Strength of diffuse light in hillshade, and inverse of the darkness of cast shadows. If not specified, this will be a random number from 0.65 through 1.00.')
+	parser.add_argument('--ambient-strength', nargs='?', type=float, metavar='0-1', help='Strength of diffuse light in hillshade, and inverse of the darkness of cast shadows. If not specified, this will be a random number from 0.75 through 1.00.')
 	return parser.parse_args()
 
 args = parseArguments()
@@ -1390,7 +1295,7 @@ if args.azimuth is None:
 if args.altitude_angle is None:
 	args.altitude_angle = random.randint(7, 45)
 if args.ambient_strength is None:
-	args.ambient_strength = 0.65 + (random.random() * random.random() * 0.35)
+	args.ambient_strength = 0.75 + (random.random() * random.random() * 0.25)
 
 reportString = ''
 for name in ['hue_delta', 'azimuth', 'altitude_angle', 'ambient_strength']:
