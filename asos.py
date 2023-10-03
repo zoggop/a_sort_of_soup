@@ -992,7 +992,7 @@ def saveInterpolationImage(interpolation, tifname):
 	colorizedGrad = arrayColorizeWithInterpolation(grad, interpolation)
 	Image.fromarray(colorizedGrad).save(storageDir + '/{}.tif'.format(tifname))
 
-def highChromaGradient(lightnesses, chromas, hues, steps=32, colorfulness=1):
+def highChromaGradient(lightnesses, chromas, hues, steps=256, colorfulness=1):
 	a = highestChromaColor(lightnesses[0], hues[0], chromas[0])
 	b = highestChromaColor(lightnesses[1], hues[1], chromas[1])
 	c = highestChromaColor(lightnesses[2], hues[2], chromas[2])
@@ -1188,7 +1188,7 @@ class TerrainCrop:
 		self.lightnesses = pickLightnesses()
 		self.chromas = pickChromas()
 		self.hues = pickHues(args.hue_delta)
-		interpolation, a, b, c = highChromaGradient(self.lightnesses, self.chromas, self.hues)
+		interpolation, a, b, c = highChromaGradient(self.lightnesses, self.chromas, self.hues, 24, args.colorfulness)
 		# saveInterpolationImage(interpolation, 'hcg')
 		# saveInterpolationImage(a.interpolate([b, c], space='oklch'), 'oklchg')
 		self.colorizeElevation(interpolation)
