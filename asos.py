@@ -18,6 +18,7 @@ import concurrent.futures
 from screeninfo import get_monitors
 from numba import jit
 from numba.types import uint8, float32, int8, boolean, int64, float64
+from colour import XYZ_to_sRGB, Oklab_to_XYZ
 
 # local modules
 import catacomb
@@ -255,17 +256,28 @@ def hardLightOrOverlayFloat(a, b, overlay=False):
 	ab[mask] = (1 - 2 * (1 - a) * (1 - b))[mask] # else this
 	return ab
 
-def OKLCH2RGB255(LCH):
-	lut = np.load(scriptDir + '/lch2rgb.npy')
-	lRes, cRes, hRes, three = lut.shape
-	liMax = lRes - 1
-	ciMax = cRes - 1
-	ciMult = ciMax / 0.32
-	li = np.clip((LCH[:,:,0] * liMax).astype(np.uint16), 0, liMax)
-	ci = np.clip((LCH[:,:,1] * ciMult).astype(np.uint16), 0, ciMax)
-	hi = np.clip((LCH[:,:,2]).astype(np.uint16), 0, 360)
-	o = lut[li, ci, hi]
-	return np.clip(o, 0, 255).astype(np.uint8)
+# def OKLCH2RGB255(LCH):
+# 	lut = np.load(scriptDir + '/lch2rgb.npy')
+# 	lRes, cRes, hRes, three = lut.shape
+# 	liMax = lRes - 1
+# 	ciMax = cRes - 1
+# 	ciMult = ciMax / 0.32
+# 	li = np.clip((LCH[:,:,0] * liMax).astype(np.uint16), 0, liMax)
+# 	ci = np.clip((LCH[:,:,1] * ciMult).astype(np.uint16), 0, ciMax)
+# 	hi = np.clip((LCH[:,:,2]).astype(np.uint16), 0, 360)
+# 	o = lut[li, ci, hi]
+# 	return np.clip(o, 0, 255).astype(np.uint8)
+
+def OKLCH2RGB255(lch): # l 0-1, c 0-1, h 0-360
+    illuminant = [0.3127, 0.329]
+    c = lch[:,:,1]
+    h = lch[:,:,2]
+    hradians = h / (360 / (2 * math.pi))
+    a = c * np.cos(hradians)
+    b = c * np.sin(hradians)
+    lab = np.stack((lch[:,:,0], a, b), axis=2)
+    rgb = XYZ_to_sRGB(Oklab_to_XYZ(lab))
+    return (np.clip(rgb, 0, 1) * 255).astype(np.uint8)
 
 def lightLUTOKLCH(aLCH, b, glow):
 	a = aLCH[:,:,0]
@@ -1188,7 +1200,7 @@ class TerrainCrop:
 		self.lightnesses = pickLightnesses()
 		self.chromas = pickChromas()
 		self.hues = pickHues(args.hue_delta)
-		interpolation, a, b, c = highChromaGradient(self.lightnesses, self.chromas, self.hues, 24, args.colorfulness)
+		interpolation, a, b, c = highChromaGradient(self.lightnesses, self.chromas, self.hues, 16, args.colorfulness)
 		# saveInterpolationImage(interpolation, 'hcg')
 		# saveInterpolationImage(a.interpolate([b, c], space='oklch'), 'oklchg')
 		self.colorizeElevation(interpolation)
