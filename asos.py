@@ -1,31 +1,31 @@
-import os
-import argparse
-import numpy as np
-from numpy.random import default_rng
-rng = default_rng()
-from PIL import Image
 import math
-from zipfile import ZipFile
-import coloraide
-from getpass import getpass
 import requests
-from io import BytesIO
 import random
-import sys
 import json
+import numpy as np
+from os import path, makedirs, remove
+from argparse import ArgumentParser
+from PIL import Image
+from zipfile import ZipFile
+from coloraide import Color
+from getpass import getpass
+from io import BytesIO
+from sys import stdout
 from cv2 import resize, INTER_LINEAR, GaussianBlur, BORDER_DEFAULT, medianBlur
-import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 from screeninfo import get_monitors
 from numba import jit
 from numba.types import uint8, float32, int8, boolean, int64, float64
 from colour import XYZ_to_sRGB, Oklab_to_XYZ
 
+rng = np.random.default_rng()
+
 # local modules
 import catacomb
 # from perceptual_hues_lavg import perceptualHues
 
-storageDir = os.path.expanduser('~/a_sort_of_soup')
-scriptDir = os.path.split(os.path.realpath(__file__))[0]
+storageDir = path.expanduser('~/a_sort_of_soup')
+scriptDir = path.split(path.realpath(__file__))[0]
 
 StatusPrintLock = False
 
@@ -108,7 +108,7 @@ def angleDist(a, b):
 	return abs(((b - a) + 180) % 360 - 180)
 
 def lch_to_rgb(lightness, chroma, hue):
-	c = coloraide.Color('oklch', [lightness, chroma, hue]).convert('srgb')
+	Color('oklch', [lightness, chroma, hue]).convert('srgb')
 	if c.in_gamut():
 		return c
 	return None
@@ -279,7 +279,7 @@ def OKLCH2RGB255(lch): # l 0-1, c 0-1, h 0-360
     rgb = XYZ_to_sRGB(Oklab_to_XYZ(lab))
     return (np.clip(rgb, 0, 1) * 255).astype(np.uint8)
 
-def lightLUTOKLCH(aLCH, b, glow):
+def lightOklch(aLCH, b, glow):
 	a = aLCH[:,:,0]
 	b = (b / 255).astype(np.single)
 	if glow == 0:
@@ -576,9 +576,9 @@ def printDownloadStatus(tileDownloads, overwrite=True):
 	StatusPrintLock = True
 	if overwrite == True:
 		for td in tileDownloads:
-			sys.stdout.write("\033[F")
+			stdout.write("\033[F")
 	for td in tileDownloads:
-		sys.stdout.write("{} {} {}\n".format(td.locationCode, td.layer, td.status or ''))
+		stdout.write("{} {} {}\n".format(td.locationCode, td.layer, td.status or ''))
 	StatusPrintLock = False
 
 def listFD(url, ext=''):
@@ -591,7 +591,7 @@ def listFD(url, ext=''):
 
 def loadSRTMtileList():
 	# get source of tile list if one hasn't been yet generated
-	if not os.path.exists(storageDir + '/srtm_tile_list.json') and not os.path.exists(scriptDir + '/srtm_tile_list.json'):
+	if not path.exists(storageDir + '/srtm_tile_list.json') and not path.exists(scriptDir + '/srtm_tile_list.json'):
 		print('downloading SRTM tile list from https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json ...')
 		response = requests.get('https://dwtkns.com/srtm30m/srtm30m_bounding_boxes.json')
 		if response.status_code == 200:
@@ -605,13 +605,13 @@ def loadSRTMtileList():
 		else:
 			print('could not download', response.url)
 	# load tile list
-	if os.path.exists(storageDir + '/srtm_tile_list.json'):
+	if path.exists(storageDir + '/srtm_tile_list.json'):
 		filePath = storageDir + '/srtm_tile_list.json'
-	elif os.path.exists(scriptDir + '/srtm_tile_list.json'):
+	elif path.exists(scriptDir + '/srtm_tile_list.json'):
 		filePath = scriptDir + '/srtm_tile_list.json'
 	with open(filePath, "r") as read_file:
 		locCodes = json.load(read_file)
-	if not os.path.exists(storageDir + '/srtm_tile_list.json'):
+	if not path.exists(storageDir + '/srtm_tile_list.json'):
 		# copy tile list to storage directory
 		with open(storageDir + '/srtm_tile_list.json', 'w') as write_file:
 				json.dump(locCodes, write_file, indent='')
@@ -619,7 +619,7 @@ def loadSRTMtileList():
 
 def loadASTERtileList():
 	# get source of tile list if one hasn't been yet generated
-	if not os.path.exists(storageDir + '/aster_tile_list.json') and not os.path.exists(scriptDir + '/aster_tile_list.json'):
+	if not path.exists(storageDir + '/aster_tile_list.json') and not path.exists(scriptDir + '/aster_tile_list.json'):
 		print('downloading ASTER tile list from https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/ ...')
 		locCodes = {}
 		for filename in listFD('https://e4ftl01.cr.usgs.gov/ASTT/ASTGTM.003/2000.03.01/', 'zip'):
@@ -628,13 +628,13 @@ def loadASTERtileList():
 		with open(storageDir + '/aster_tile_list.json', 'w') as write_file:
 				json.dump(locCodes, write_file, indent='')
 	# load tile list
-	if os.path.exists(storageDir + '/aster_tile_list.json'):
+	if path.exists(storageDir + '/aster_tile_list.json'):
 		filePath = storageDir + '/aster_tile_list.json'
-	elif os.path.exists(scriptDir + '/aster_tile_list.json'):
+	elif path.exists(scriptDir + '/aster_tile_list.json'):
 		filePath = scriptDir + '/aster_tile_list.json'
 	with open(filePath, "r") as read_file:
 		locCodes = json.load(read_file)
-	if not os.path.exists(storageDir + '/aster_tile_list.json'):
+	if not path.exists(storageDir + '/aster_tile_list.json'):
 		# copy tile list to storage directory
 		with open(storageDir + '/aster_tile_list.json', 'w') as write_file:
 				json.dump(locCodes, write_file, indent='')
@@ -723,7 +723,7 @@ class TileDownload:
 				self.setStatus('downloaded {:,} kB'.format(int((self.fileSize or 0) / 1024)))
 
 	def extractAndRead(self):
-		if not os.path.exists(self.filepath):
+		if not path.exists(self.filepath):
 			if self.missing:
 				# create an array of zeros to fill in missing data
 				dataType = bool
@@ -734,7 +734,7 @@ class TileDownload:
 				return None
 		with ZipFile(self.filepath, 'r') as zf:
 			with zf.open(self.zippedFilename, mode='r') as zippedFile:
-				ext = os.path.splitext(self.zippedFilename)[1].lower()
+				ext = path.splitext(self.zippedFilename)[1].lower()
 				raw = zippedFile.read()
 				arr = None
 				if ext == '.hgt':
@@ -802,7 +802,7 @@ class Compartment:
 	def downloadTilesConcurrently(self):
 		print(" ")
 		printDownloadStatus(self.tileDownloads, False)
-		with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+		with ThreadPoolExecutor(max_workers=8) as executor:
 			executor.map(downloadOneTile, self.tileDownloads)
 
 	def download(self):
@@ -879,8 +879,8 @@ class Compartment:
 
 	def deleteDownloadedFiles(self):
 		for td in self.tileDownloads:
-			if os.path.exists(td.filepath):
-				os.remove(td.filepath)
+			if path.exists(td.filepath):
+				remove(td.filepath)
 
 def downloadOneTile(tileDownload):
 	tileDownload.downloadWithAuth()
@@ -1123,7 +1123,7 @@ class TerrainCrop:
 			self.shaded_color_elev = OKLCH2RGB255(self.lch_color_elev)
 		else:
 			# self.shaded_color_elev = lightRGB(self.color_elev, self.hillshade, args.glow)
-			self.shaded_color_elev = lightLUTOKLCH(self.lch_color_elev, self.hillshade, args.glow)
+			self.shaded_color_elev = lightOklch(self.lch_color_elev, self.hillshade, args.glow)
 
 	def superimposeWaterbody(self, waterColors):
 		if args.no_water or self.waterbody is None:
@@ -1168,8 +1168,8 @@ class TerrainCrop:
 			final_arr = self.color_elev
 		final_img = Image.fromarray(final_arr)
 		if not args.output is None:
-			if os.path.exists(os.path.split(args.output)[0]):
-				ext = os.path.splitext(args.output)[1].lower()
+			if path.exists(path.split(args.output)[0]):
+				ext = path.splitext(args.output)[1].lower()
 				if ext == '':
 					final_img.save(args.output, format='PNG')
 				elif ext == '.jpg' or ext == '.jpeg':
@@ -1223,7 +1223,8 @@ class TerrainCrop:
 			'lightnesses' : self.lightnesses,
 			'chromas' : self.chromas,
 			'hues' : self.hues,
-			'water_colors' : wcLCH}
+			'water_colors' : wcLCH,
+			'colorfulness' : args.colorfulness}
 		return out
 
 	def lightDict(self):
@@ -1253,7 +1254,7 @@ def checkOutLocationCodes(codes):
 	return True
 
 def parseArguments():
-	parser = argparse.ArgumentParser(description='Create a colorful image of terrain of a random location.')
+	parser = ArgumentParser(description='Create a colorful image of terrain of a random location.')
 	parser.add_argument('--new-login', action='store_true', default=False, help='Enter an Earthdata username & password and store it encrypted for future use. Overwrites currently stored login information if any.')
 	parser.add_argument('--one-time-login', action='store_true', default=False, help='Enter an Earthdata username & password to use only for this run, and do not store it.')
 	parser.add_argument('--previous', '-p', action='store_true', default=False, help='Use previously downloaded data. --dimensions, --coordinates, and --rotation will have no effect.')
@@ -1286,14 +1287,14 @@ def parseArguments():
 args = parseArguments()
 
 # use previous colors if asked for
-if args.previous_colors and os.path.exists(storageDir + '/previous-colors.json'):
+if args.previous_colors and path.exists(storageDir + '/previous-colors.json'):
 		with open(storageDir + '/previous-colors.json', "r") as read_file:
 			prevColors = json.load(read_file)
 			for k in prevColors.keys():
 				if getattr(args, k) is None:
 					setattr(args, k, prevColors.get(k))
 # use previous lighting if asked for
-if args.previous_light and os.path.exists(storageDir + '/previous-light.json'):
+if args.previous_light and path.exists(storageDir + '/previous-light.json'):
 		with open(storageDir + '/previous-light.json', "r") as read_file:
 			prevLight = json.load(read_file)
 			for k in prevLight.keys():
@@ -1319,8 +1320,8 @@ for name in ['hue_delta', 'azimuth', 'altitude_angle', 'ambient_strength']:
 		reportString += ' --{} {}'.format(nameConv, val)
 print(reportString)
 
-if not os.path.exists(storageDir):
-	os.makedirs(storageDir)
+if not path.exists(storageDir):
+	makedirs(storageDir)
 
 SRTMlocationCodes = loadSRTMtileList()
 ASTERlocationCodes = loadASTERtileList()
@@ -1333,7 +1334,7 @@ for m in get_monitors():
 	if screenHeight == None or m.height > screenHeight:
 		screenHeight = m.height
 
-if args.previous and os.path.exists(storageDir + '/previous.json'):
+if args.previous and path.exists(storageDir + '/previous.json'):
 	# get previous info if asked for and exists
 	with open(storageDir + '/previous.json', "r") as read_file:
 		previousInfo = json.load(read_file)
