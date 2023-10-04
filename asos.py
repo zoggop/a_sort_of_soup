@@ -108,7 +108,7 @@ def angleDist(a, b):
 	return abs(((b - a) + 180) % 360 - 180)
 
 def lch_to_rgb(lightness, chroma, hue):
-	Color('oklch', [lightness, chroma, hue]).convert('srgb')
+	c = Color('oklch', [lightness, chroma, hue]).convert('srgb')
 	if c.in_gamut():
 		return c
 	return None
