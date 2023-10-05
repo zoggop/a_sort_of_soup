@@ -22,7 +22,6 @@ rng = np.random.default_rng()
 
 # local modules
 import catacomb
-# from perceptual_hues_lavg import perceptualHues
 
 storageDir = path.expanduser('~/a_sort_of_soup')
 scriptDir = path.split(path.realpath(__file__))[0]
@@ -99,10 +98,6 @@ def xyMultAtLatLon(latitude, longitude, size=1):
 		xMult = 0.5
 		yMult = yMult / 2
 	return xMult, yMult, xMeters, yMeters
-
-def perceptuallyUniformRandomHue():
-	return random.randint(0, 359)
-	# return random.choice(perceptualHues)
 
 def angleDist(a, b):
 	return abs(((b - a) + 180) % 360 - 180)
@@ -255,18 +250,6 @@ def hardLightOrOverlayFloat(a, b, overlay=False):
 	ab[~mask] = (2 * a * b)[~mask] # 2ab everywhere b < 0.5
 	ab[mask] = (1 - 2 * (1 - a) * (1 - b))[mask] # else this
 	return ab
-
-# def OKLCH2RGB255(LCH):
-# 	lut = np.load(scriptDir + '/lch2rgb.npy')
-# 	lRes, cRes, hRes, three = lut.shape
-# 	liMax = lRes - 1
-# 	ciMax = cRes - 1
-# 	ciMult = ciMax / 0.32
-# 	li = np.clip((LCH[:,:,0] * liMax).astype(np.uint16), 0, liMax)
-# 	ci = np.clip((LCH[:,:,1] * ciMult).astype(np.uint16), 0, ciMax)
-# 	hi = np.clip((LCH[:,:,2]).astype(np.uint16), 0, 360)
-# 	o = lut[li, ci, hi]
-# 	return np.clip(o, 0, 255).astype(np.uint8)
 
 def OKLCH2RGB255(lch): # l 0-1, c 0-1, h 0-360
     illuminant = [0.3127, 0.329]
@@ -911,7 +894,7 @@ def pickHues(hueDeltaE):
 			ch = args.hues[2]
 	if ah is None:
 		if bh is None and ch is None:
-			ah = perceptuallyUniformRandomHue()
+			ah = random.randint(0, 359)
 		elif bh is None:
 			ah = nextHueByDeltaE([ch], hueDeltaE)
 		elif ch is None:
